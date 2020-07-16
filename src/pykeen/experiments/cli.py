@@ -3,14 +3,16 @@
 """Run landmark experiments."""
 
 import logging
-import os
-import shutil
 import sys
 import time
 from typing import Optional
 from uuid import uuid4
 
 import click
+import os
+import shutil
+
+from .convkb_reproducibility_pipeline import run_convkb_experiment
 
 __all__ = [
     'experiments',
@@ -112,6 +114,29 @@ def run(
         directory=directory,
         move_to_cpu=move_to_cpu,
         save_replicates=not discard_replicates,
+    )
+
+
+@experiments.command()
+@click.argument('dataset')
+@replicates_option
+@move_to_cpu_option
+@discard_replicates_option
+@directory_option
+def reproduce_convkb(
+    dataset: str,
+    replicates: int,
+    directory: str,
+    move_to_cpu: bool,
+    discard_replicates: bool,
+):
+    """Run ConvKB reproducibility experiment."""
+    run_convkb_experiment(
+        dataset=dataset,
+        directory=directory,
+        replicates=replicates,
+        move_to_cpu=move_to_cpu,
+        discard_replicates=discard_replicates,
     )
 
 
