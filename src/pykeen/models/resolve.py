@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 """A :class:`pykeen.models.ERModel` can be constructed from :class:`pykeen.nn.modules.Interaction`.
 
 The new style-class, :class:`pykeen.models.ERModel` abstracts the interaction away from the representations
@@ -58,7 +56,8 @@ argument of :func:`pykeen.pipeline.pipeline`.
 """
 
 import logging
-from typing import Any, Mapping, Optional, Sequence, Tuple, Type, Union
+from collections.abc import Mapping, Sequence
+from typing import Any, Optional, Union
 
 from class_resolver import OptionalKwargs
 
@@ -79,7 +78,7 @@ def make_model(
     interaction: Union[
         str,
         Interaction[HeadRepresentation, RelationRepresentation, TailRepresentation],
-        Type[Interaction[HeadRepresentation, RelationRepresentation, TailRepresentation]],
+        type[Interaction[HeadRepresentation, RelationRepresentation, TailRepresentation]],
     ],
     interaction_kwargs: Optional[Mapping[str, Any]] = None,
     entity_representations_kwargs: OptionalKwargs = None,
@@ -121,12 +120,12 @@ def make_model_cls(
     interaction: Union[
         str,
         Interaction[HeadRepresentation, RelationRepresentation, TailRepresentation],
-        Type[Interaction[HeadRepresentation, RelationRepresentation, TailRepresentation]],
+        type[Interaction[HeadRepresentation, RelationRepresentation, TailRepresentation]],
     ],
     interaction_kwargs: Optional[Mapping[str, Any]] = None,
     entity_representations_kwargs: OptionalKwargs = None,
     relation_representations_kwargs: OptionalKwargs = None,
-) -> Type[ERModel]:
+) -> type[ERModel]:
     """Build a model class from an interaction class hint (name or class)."""
     if isinstance(interaction, Interaction):
         interaction_instance = interaction
@@ -135,7 +134,7 @@ def make_model_cls(
 
     entity_representations_kwargs, relation_representations_kwargs = _normalize_representation_kwargs(
         dimensions=dimensions,
-        interaction=interaction_instance.__class__,  # type: ignore
+        interaction=interaction_instance,  # type: ignore
         entity_representations_kwargs=entity_representations_kwargs,
         relation_representations_kwargs=relation_representations_kwargs,
     )
@@ -162,20 +161,17 @@ def make_model_cls(
 
 def _normalize_representation_kwargs(
     dimensions: Union[int, Mapping[str, int]],
-    interaction: Type[Interaction[HeadRepresentation, RelationRepresentation, TailRepresentation]],
+    interaction: Interaction[HeadRepresentation, RelationRepresentation, TailRepresentation],
     entity_representations_kwargs: OptionalKwargs,
     relation_representations_kwargs: OptionalKwargs,
-) -> Tuple[Sequence[OptionalKwargs], Sequence[OptionalKwargs]]:
+) -> tuple[Sequence[OptionalKwargs], Sequence[OptionalKwargs]]:
     # TODO: update to hint + kwargs
     if isinstance(dimensions, int):
         dimensions = {"d": dimensions}
     assert isinstance(dimensions, dict)
-    if set(dimensions) < interaction.get_dimensions():
-        raise DimensionError(set(dimensions), interaction.get_dimensions())
+    if set(dimensions) < interaction.dimensions:
+        raise DimensionError(set(dimensions), interaction.dimensions)
     if entity_representations_kwargs is None:
-        # TODO: Does not work for interactions with separate tail_entity_shape (i.e., ConvE)
-        if interaction._tail_entity_shape is not None:
-            raise NotImplementedError
         entity_representations_kwargs = [
             dict(shape=tuple(dimensions[d] for d in shape)) for shape in interaction.entity_shape
         ]

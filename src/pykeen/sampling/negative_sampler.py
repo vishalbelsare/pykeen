@@ -1,16 +1,14 @@
-# -*- coding: utf-8 -*-
-
 """Basic structure for a negative sampler."""
 
 from abc import abstractmethod
-from typing import Any, ClassVar, Mapping, Optional, Tuple
+from collections.abc import Mapping
+from typing import Any, ClassVar, Optional
 
-import torch
 from class_resolver import HintOrType, normalize_string
 from torch import nn
 
 from .filtering import Filterer, filterer_resolver
-from ..typing import MappedTriples
+from ..typing import BoolTensor, LongTensor, MappedTriples
 
 __all__ = [
     "NegativeSampler",
@@ -80,7 +78,7 @@ class NegativeSampler(nn.Module):
         """Get the normalized name of the negative sampler."""
         return normalize_string(cls.__name__, suffix=NegativeSampler.__name__)
 
-    def sample(self, positive_batch: torch.LongTensor) -> Tuple[torch.LongTensor, Optional[torch.BoolTensor]]:
+    def sample(self, positive_batch: LongTensor) -> tuple[LongTensor, Optional[BoolTensor]]:
         """
         Generate negative samples from the positive batch.
 
@@ -106,7 +104,7 @@ class NegativeSampler(nn.Module):
         return negative_batch, self.filterer(negative_batch=negative_batch)
 
     @abstractmethod
-    def corrupt_batch(self, positive_batch: torch.LongTensor) -> torch.LongTensor:
+    def corrupt_batch(self, positive_batch: LongTensor) -> LongTensor:
         """
         Generate negative samples from the positive batch without application of any filter.
 

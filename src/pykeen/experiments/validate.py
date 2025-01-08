@@ -1,12 +1,10 @@
-# -*- coding: utf-8 -*-
-
 """A validator for experimental settings."""
 
 import inspect
 import pathlib
-from typing import Callable, Iterable, Optional, Set, Tuple, Type, Union
+from collections.abc import Iterable
+from typing import Callable, Optional, Union
 
-import torch
 from class_resolver import Hint
 from torch import nn
 
@@ -20,6 +18,7 @@ from ..optimizers import optimizer_resolver
 from ..regularizers import regularizer_resolver
 from ..sampling import negative_sampler_resolver
 from ..training import training_loop_resolver
+from ..typing import FloatTensor
 from ..utils import CONFIGURATION_FILE_FORMATS, load_configuration, normalize_string
 
 _SKIP_NAMES = {
@@ -36,17 +35,17 @@ _SKIP_NAMES = {
 _SKIP_ANNOTATIONS = {
     nn.Embedding,
     Optional[nn.Embedding],
-    Type[nn.Embedding],
-    Optional[Type[nn.Embedding]],
+    type[nn.Embedding],
+    Optional[type[nn.Embedding]],
     nn.Module,
     Optional[nn.Module],
-    Type[nn.Module],
-    Optional[Type[nn.Module]],
+    type[nn.Module],
+    Optional[type[nn.Module]],
     Model,
     Optional[Model],
-    Type[Model],
-    Optional[Type[Model]],
-    Union[str, Callable[[torch.FloatTensor], torch.FloatTensor]],
+    type[Model],
+    Optional[type[Model]],
+    Union[str, Callable[[FloatTensor], FloatTensor]],
     Hint[nn.Module],
 }
 _SKIP_EXTRANEOUS = {
@@ -54,7 +53,7 @@ _SKIP_EXTRANEOUS = {
 }
 
 
-def iterate_config_paths() -> Iterable[Tuple[str, pathlib.Path, pathlib.Path]]:
+def iterate_config_paths() -> Iterable[tuple[str, pathlib.Path, pathlib.Path]]:
     """Iterate over all configuration paths."""
     for model_directory in HERE.iterdir():
         if model_directory.name not in model_resolver.lookup_dict:
@@ -96,8 +95,8 @@ def get_configuration_errors(path: Union[str, pathlib.Path]):  # noqa: C901
         normalize: bool = False,
         suffix: Optional[str] = None,
         check_kwargs: bool = False,
-        required_kwargs: Optional[Set[str]] = None,
-        allowed_missing_kwargs: Optional[Set[str]] = None,
+        required_kwargs: Optional[set[str]] = None,
+        allowed_missing_kwargs: Optional[set[str]] = None,
     ):
         value = test_dict.get(key)
         if value is None:

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 """
 Anchor selection for NodePiece.
 
@@ -10,7 +8,8 @@ entities. Most of these methods rely on some form of
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Iterable, Optional, Sequence, Union
+from collections.abc import Iterable, Sequence
+from typing import Optional, Union
 
 import numpy
 import torch
@@ -279,6 +278,7 @@ class MixtureAnchorSelection(AnchorSelection):
         return anchors
 
 
+#: A resolver for NodePiece anchor selectors
 anchor_selection_resolver: ClassResolver[AnchorSelection] = ClassResolver.from_subclasses(
     base=AnchorSelection,
     default=DegreeAnchorSelection,

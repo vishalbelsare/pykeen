@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
-
 """Implementation of triples splitting functions."""
 
 import logging
 import typing
 from abc import abstractmethod
-from typing import Collection, Optional, Sequence, Set, Tuple, Type, Union
+from collections.abc import Collection, Sequence
+from typing import Optional, Union
 
 import numpy
 import pandas
@@ -13,13 +12,27 @@ import torch
 from class_resolver.api import ClassResolver, HintOrType
 
 from ..constants import COLUMN_LABELS
-from ..typing import LABEL_HEAD, LABEL_RELATION, LABEL_TAIL, MappedTriples, Target, TorchRandomHint
+from ..typing import LABEL_HEAD, LABEL_RELATION, LABEL_TAIL, BoolTensor, MappedTriples, Target, TorchRandomHint
 from ..utils import ensure_torch_random_state
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "split",
+    # Cleaners
+    "cleaner_resolver",
+    "Cleaner",
+    "RandomizedCleaner",
+    "DeterministicCleaner",
+    # Splitters
+    "splitter_resolver",
+    "Splitter",
+    "CleanupSplitter",
+    "CoverageSplitter",
+    # Utils
+    "TripleCoverageError",
+    "normalize_ratios",
+    "get_absolute_split_sizes",
 ]
 
 
@@ -62,15 +75,15 @@ def _split_triples(
     return triples_groups
 
 
-def _get_cover_for_column(df: pandas.DataFrame, column: Target, index_column: str = "index") -> Set[int]:
+def _get_cover_for_column(df: pandas.DataFrame, column: Target, index_column: str = "index") -> set[int]:
     return set(df.groupby(by=column).agg({index_column: "min"})[index_column].values)
 
 
-def _get_covered_entities(df: pandas.DataFrame, chosen: Collection[int]) -> Set[int]:
+def _get_covered_entities(df: pandas.DataFrame, chosen: Collection[int]) -> set[int]:
     return set(numpy.unique(df.loc[df["index"].isin(chosen), [LABEL_HEAD, LABEL_TAIL]]))
 
 
-def _get_cover_deterministic(triples: MappedTriples) -> torch.BoolTensor:
+def _get_cover_deterministic(triples: MappedTriples) -> BoolTensor:
     """
     Get a coverage mask for all entities and relations.
 
@@ -93,9 +106,6 @@ def _get_cover_deterministic(triples: MappedTriples) -> torch.BoolTensor:
 
     # select one triple per relation
     chosen = _get_cover_for_column(df=df, column=LABEL_RELATION)
-
-    # maintain set of covered entities
-    covered = _get_covered_entities(df=df, chosen=chosen)
 
     # Select one triple for each head/tail entity, which is not yet covered.
     for column in (LABEL_HEAD, LABEL_TAIL):
@@ -132,7 +142,7 @@ class TripleCoverageError(RuntimeError):
 def normalize_ratios(
     ratios: Union[float, Sequence[float]],
     epsilon: float = 1.0e-06,
-) -> Tuple[float, ...]:
+) -> tuple[float, ...]:
     """Normalize relative sizes.
 
     If the sum is smaller than 1, adds (1 - sum)
@@ -163,7 +173,7 @@ def normalize_ratios(
 def get_absolute_split_sizes(
     n_total: int,
     ratios: Sequence[float],
-) -> Tuple[int, ...]:
+) -> tuple[int, ...]:
     """
     Compute absolute sizes of splits from given relative sizes.
 
@@ -196,7 +206,7 @@ class Cleaner:
         reference: MappedTriples,
         other: MappedTriples,
         random_state: TorchRandomHint,
-    ) -> Tuple[MappedTriples, MappedTriples]:
+    ) -> tuple[MappedTriples, MappedTriples]:
         """
         Clean up one set of triples with respect to a reference set.
 
@@ -229,8 +239,8 @@ class Cleaner:
 def _prepare_cleanup(
     training: MappedTriples,
     testing: MappedTriples,
-    max_ids: Optional[Tuple[int, int]] = None,
-) -> torch.BoolTensor:
+    max_ids: Optional[tuple[int, int]] = None,
+) -> BoolTensor:
     """
     Calculate a mask for the test triples with triples containing test-only entities or relations.
 
@@ -254,7 +264,7 @@ def _prepare_cleanup(
     to_move_mask = torch.zeros(1, dtype=torch.bool)
     if max_ids is None:
         max_ids = typing.cast(
-            Tuple[int, int],
+            tuple[int, int],
             tuple(max(training[:, col].max().item(), testing[:, col].max().item()) + 1 for col in columns),
         )
     for col, max_id in zip(columns, max_ids):
@@ -282,7 +292,7 @@ class RandomizedCleaner(Cleaner):
         reference: MappedTriples,
         other: MappedTriples,
         random_state: TorchRandomHint,
-    ) -> Tuple[MappedTriples, MappedTriples]:  # noqa: D102
+    ) -> tuple[MappedTriples, MappedTriples]:  # noqa: D102
         generator = ensure_torch_random_state(random_state)
         move_id_mask = _prepare_cleanup(reference, other)
 
@@ -290,6 +300,8 @@ class RandomizedCleaner(Cleaner):
         while move_id_mask.any():
             # Pick a random triple to move over to the training triples
             (candidates,) = move_id_mask.nonzero(as_tuple=True)
+            # TODO: this could easily be extended to select a batch of triples
+            # -> speeds up the process at the cost of slightly larger movements
             idx = torch.randint(candidates.shape[0], size=(1,), generator=generator)
             idx = candidates[idx]
 
@@ -312,13 +324,14 @@ class DeterministicCleaner(Cleaner):
         reference: MappedTriples,
         other: MappedTriples,
         random_state: TorchRandomHint,
-    ) -> Tuple[MappedTriples, MappedTriples]:  # noqa: D102
+    ) -> tuple[MappedTriples, MappedTriples]:  # noqa: D102
         move_id_mask = _prepare_cleanup(reference, other)
         reference = torch.cat([reference, other[move_id_mask]])
         other = other[~move_id_mask]
         return reference, other
 
 
+#: A resolver for triple cleaners
 cleaner_resolver: ClassResolver[Cleaner] = ClassResolver.from_subclasses(base=Cleaner, default=DeterministicCleaner)
 
 
@@ -456,6 +469,7 @@ class CoverageSplitter(Splitter):
         return [torch.cat([train_seed, train], dim=0), *rest]
 
 
+#: A resolver for triple splitters
 splitter_resolver: ClassResolver[Splitter] = ClassResolver.from_subclasses(base=Splitter, default=CoverageSplitter)
 
 
@@ -485,7 +499,8 @@ def split(
         it does not necessarily have to move all of them, but it might be significantly slower since it moves one
         triple at a time.
     :param method:
-        The name of the method to use, cf. :data:`splitter_resolver`. Defaults to "coverage".
+        The name of the method to use, cf. :data:`splitter_resolver`. Defaults to "coverage", i.e.,
+        :class:`CoverageSplitter`.
 
     :return:
         A partition of triples, which are split (approximately) according to the ratios.
@@ -502,7 +517,7 @@ def split(
         train, test, val = split(triples, ratios)
     """
     # backwards compatibility
-    splitter_cls: Type[Splitter] = splitter_resolver.lookup(method)
+    splitter_cls: type[Splitter] = splitter_resolver.lookup(method)
     kwargs = dict()
     if splitter_cls is CleanupSplitter and randomize_cleanup:
         kwargs["cleaner"] = cleaner_resolver.normalize_cls(RandomizedCleaner)

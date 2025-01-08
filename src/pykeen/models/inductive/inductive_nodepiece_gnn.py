@@ -1,16 +1,21 @@
-# -*- coding: utf-8 -*-
-
 """A wrapper which combines an interaction function with NodePiece entity representations."""
 
 import logging
-from typing import Iterable, Optional, Tuple, cast
+from collections.abc import Iterable
+from typing import Optional, cast
 
 import torch
 from torch import nn
 
 from .inductive_nodepiece import InductiveNodePiece
 from ...nn.representation import CompGCNLayer
-from ...typing import HeadRepresentation, InductiveMode, RelationRepresentation, TailRepresentation
+from ...typing import (
+    HeadRepresentation,
+    InductiveMode,
+    LongTensor,
+    RelationRepresentation,
+    TailRepresentation,
+)
 from ...utils import get_edge_index
 
 __all__ = [
@@ -103,11 +108,11 @@ class InductiveNodePieceGNN(InductiveNodePiece):
 
     def _get_representations(
         self,
-        h: Optional[torch.LongTensor],
-        r: Optional[torch.LongTensor],
-        t: Optional[torch.LongTensor],
+        h: Optional[LongTensor],
+        r: Optional[LongTensor],
+        t: Optional[LongTensor],
         mode: Optional[InductiveMode] = None,
-    ) -> Tuple[HeadRepresentation, RelationRepresentation, TailRepresentation]:
+    ) -> tuple[HeadRepresentation, RelationRepresentation, TailRepresentation]:
         """Get representations for head, relation and tails, in canonical shape with a GNN encoder."""
         entity_representations = self._get_entity_representations_from_inductive_mode(mode=mode)
 
@@ -134,6 +139,6 @@ class InductiveNodePieceGNN(InductiveNodePiece):
 
         # normalization
         return cast(
-            Tuple[HeadRepresentation, RelationRepresentation, TailRepresentation],
+            tuple[HeadRepresentation, RelationRepresentation, TailRepresentation],
             tuple(x[0] if len(x) == 1 else x for x in (hh, rr, tt)),
         )

@@ -1,27 +1,16 @@
-# -*- coding: utf-8 -*-
-
 """Implementation of basic instance factory which creates just instances based on standard KG triples."""
 
 import dataclasses
 import logging
 import pathlib
 import re
-import warnings
+from collections.abc import Collection, Iterable, Mapping, MutableMapping, Sequence
 from typing import (
     Any,
     Callable,
     ClassVar,
-    Collection,
-    Dict,
-    Iterable,
-    List,
-    Mapping,
-    MutableMapping,
     Optional,
-    Sequence,
-    Set,
     TextIO,
-    Tuple,
     Union,
     cast,
 )
@@ -29,14 +18,20 @@ from typing import (
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset
 
-from .instances import BatchedSLCWAInstances, LCWAInstances, SubGraphSLCWAInstances
 from .splitting import split
 from .utils import TRIPLES_DF_COLUMNS, load_triples, tensor_to_df
 from ..constants import COLUMN_LABELS
 from ..inverse import relation_inverter_resolver
-from ..typing import EntityMapping, LabeledTriples, MappedTriples, RelationMapping, TorchRandomHint
+from ..typing import (
+    BoolTensor,
+    EntityMapping,
+    LabeledTriples,
+    LongTensor,
+    MappedTriples,
+    RelationMapping,
+    TorchRandomHint,
+)
 from ..utils import (
     ExtraReprMixin,
     compact_mapping,
@@ -150,7 +145,7 @@ def _get_triple_mask(
     columns: Union[int, Collection[int]],
     invert: bool = False,
     max_id: Optional[int] = None,
-) -> torch.BoolTensor:
+) -> BoolTensor:
     # normalize input
     triples = triples[:, columns]
     if isinstance(columns, int):
@@ -198,7 +193,7 @@ class Labeling:
 
     def label(
         self,
-        ids: Union[int, Sequence[int], np.ndarray, torch.LongTensor],
+        ids: Union[int, Sequence[int], np.ndarray, LongTensor],
         unknown_label: str = "unknown",
     ) -> np.ndarray:
         """Convert IDs to labels."""
@@ -474,31 +469,7 @@ class CoreTriplesFactory(KGInfo):
             ]
         )
 
-    def create_slcwa_instances(self, *, sampler: Optional[str] = None, **kwargs) -> Dataset:
-        """Create sLCWA instances for this factory's triples."""
-        cls = BatchedSLCWAInstances if sampler is None else SubGraphSLCWAInstances
-        if "shuffle" in kwargs:
-            if kwargs.pop("shuffle"):
-                warnings.warn("Training instances are always shuffled.", DeprecationWarning)
-            else:
-                raise AssertionError("If shuffle is provided, it must be True.")
-        return cls(
-            mapped_triples=self._add_inverse_triples_if_necessary(mapped_triples=self.mapped_triples),
-            num_entities=self.num_entities,
-            num_relations=self.num_relations,
-            **kwargs,
-        )
-
-    def create_lcwa_instances(self, use_tqdm: Optional[bool] = None, target: Optional[int] = None) -> Dataset:
-        """Create LCWA instances for this factory's triples."""
-        return LCWAInstances.from_triples(
-            mapped_triples=self._add_inverse_triples_if_necessary(mapped_triples=self.mapped_triples),
-            num_entities=self.num_entities,
-            num_relations=self.num_relations,
-            target=target,
-        )
-
-    def get_most_frequent_relations(self, n: Union[int, float]) -> Set[int]:
+    def get_most_frequent_relations(self, n: Union[int, float]) -> set[int]:
         """Get the IDs of the n most frequent relations.
 
         :param n:
@@ -516,13 +487,13 @@ class CoreTriplesFactory(KGInfo):
             raise TypeError("n must be either an integer or a float")
 
         uniq, counts = self.mapped_triples[:, 1].unique(return_counts=True)
-        top_counts, top_ids = counts.topk(k=n, largest=True)
+        top_ids = counts.topk(k=n, largest=True)[1]
         return set(uniq[top_ids].tolist())
 
     def clone_and_exchange_triples(
         self,
         mapped_triples: MappedTriples,
-        extra_metadata: Optional[Dict[str, Any]] = None,
+        extra_metadata: Optional[dict[str, Any]] = None,
         keep_metadata: bool = True,
         create_inverse_triples: Optional[bool] = None,
     ) -> "CoreTriplesFactory":
@@ -565,8 +536,12 @@ class CoreTriplesFactory(KGInfo):
         random_state: TorchRandomHint = None,
         randomize_cleanup: bool = False,
         method: Optional[str] = None,
-    ) -> List["CoreTriplesFactory"]:
-        """Split a triples factory into a train/test.
+    ) -> list["CoreTriplesFactory"]:
+        """Split a triples factory into a training part and a variable number of (transductive) evaluation parts.
+
+        .. warning::
+
+            This method is not suitable to create *inductive* splits.
 
         :param ratios:
             There are three options for this argument:
@@ -580,15 +555,17 @@ class CoreTriplesFactory(KGInfo):
         :param random_state:
             The random state used to shuffle and split the triples.
         :param randomize_cleanup:
-            If true, uses the non-deterministic method for moving triples to the training set. This has the
-            advantage that it does not necessarily have to move all of them, but it might be significantly
-            slower since it moves one triple at a time.
+            This parameter is forwarded to the underlying :func:`pykeen.triples.splitting.split`.
         :param method:
-            The name of the method to use, from SPLIT_METHODS. Defaults to "coverage".
+            This parameter is forwarded to the underlying :func:`pykeen.triples.splitting.split`.
+
 
         :return:
             A partition of triples, which are split (approximately) according to the ratios, stored TriplesFactory's
             which share everything else with this root triples factory.
+
+        .. seealso::
+            :func:`pykeen.triples.splitting.split`
 
         .. code-block:: python
 
@@ -653,7 +630,7 @@ class CoreTriplesFactory(KGInfo):
         self,
         relations: Collection[int],
         invert: bool = False,
-    ) -> torch.BoolTensor:
+    ) -> BoolTensor:
         """Get a boolean mask for triples with the given relations."""
         return _get_triple_mask(
             ids=relations,
@@ -665,7 +642,7 @@ class CoreTriplesFactory(KGInfo):
 
     def tensor_to_df(
         self,
-        tensor: torch.LongTensor,
+        tensor: LongTensor,
         **kwargs: Union[torch.Tensor, np.ndarray, Sequence],
     ) -> pd.DataFrame:
         """Take a tensor of triples and make a pandas dataframe with labels.
@@ -876,7 +853,7 @@ class TriplesFactory(CoreTriplesFactory):
         relation_to_id: Optional[RelationMapping] = None,
         compact_id: bool = True,
         filter_out_candidate_inverse_relations: bool = True,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> "TriplesFactory":
         """
         Create a new triples factory from label-based triples.
@@ -954,7 +931,7 @@ class TriplesFactory(CoreTriplesFactory):
         entity_to_id: Optional[EntityMapping] = None,
         relation_to_id: Optional[RelationMapping] = None,
         compact_id: bool = True,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
         load_triples_kwargs: Optional[Mapping[str, Any]] = None,
         **kwargs,
     ) -> "TriplesFactory":
@@ -1035,9 +1012,7 @@ class TriplesFactory(CoreTriplesFactory):
             pd.DataFrame(
                 data=data.items(),
                 columns=["label", "id"],
-            ).sort_values(
-                by="id"
-            ).set_index("id").to_csv(
+            ).sort_values(by="id").set_index("id").to_csv(
                 path.joinpath(f"{name}.tsv.gz"),
                 sep="\t",
             )
@@ -1059,7 +1034,7 @@ class TriplesFactory(CoreTriplesFactory):
     def clone_and_exchange_triples(
         self,
         mapped_triples: MappedTriples,
-        extra_metadata: Optional[Dict[str, Any]] = None,
+        extra_metadata: Optional[dict[str, Any]] = None,
         keep_metadata: bool = True,
         create_inverse_triples: Optional[bool] = None,
     ) -> "TriplesFactory":  # noqa: D102
@@ -1157,7 +1132,7 @@ class TriplesFactory(CoreTriplesFactory):
         self,
         relations: Union[Collection[int], Collection[str]],
         invert: bool = False,
-    ) -> torch.BoolTensor:
+    ) -> BoolTensor:
         """Get a boolean mask for triples with the given relations."""
         return super().get_mask_for_relations(relations=self.relations_to_ids(relations=relations), invert=invert)
 
@@ -1193,7 +1168,7 @@ class TriplesFactory(CoreTriplesFactory):
             top=top or 100,
         )
 
-    def _word_cloud(self, *, ids: torch.LongTensor, id_to_label: Mapping[int, str], top: int):
+    def _word_cloud(self, *, ids: LongTensor, id_to_label: Mapping[int, str], top: int):
         try:
             from wordcloud import WordCloud
         except ImportError:
@@ -1225,7 +1200,7 @@ class TriplesFactory(CoreTriplesFactory):
     # docstr-coverage: inherited
     def tensor_to_df(
         self,
-        tensor: torch.LongTensor,
+        tensor: LongTensor,
         **kwargs: Union[torch.Tensor, np.ndarray, Sequence],
     ) -> pd.DataFrame:  # noqa: D102
         data = super().tensor_to_df(tensor=tensor, **kwargs)
@@ -1319,7 +1294,7 @@ def splits_similarity(a: Sequence[CoreTriplesFactory], b: Sequence[CoreTriplesFa
 
 
 AnyTriples = Union[
-    Tuple[str, str, str], Sequence[Tuple[str, str, str]], LabeledTriples, MappedTriples, CoreTriplesFactory
+    tuple[str, str, str], Sequence[tuple[str, str, str]], LabeledTriples, MappedTriples, CoreTriplesFactory
 ]
 
 
@@ -1327,7 +1302,7 @@ def get_mapped_triples(
     x: Optional[AnyTriples] = None,
     *,
     mapped_triples: Optional[MappedTriples] = None,
-    triples: Union[None, LabeledTriples, Tuple[str, str, str], Sequence[Tuple[str, str, str]]] = None,
+    triples: Union[None, LabeledTriples, tuple[str, str, str], Sequence[tuple[str, str, str]]] = None,
     factory: Optional[CoreTriplesFactory] = None,
 ) -> MappedTriples:
     """

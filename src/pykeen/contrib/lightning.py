@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 """PyTorch Lightning integration.
 
 PyTorch Lightning poses an alternative way to implement a training
@@ -44,8 +42,10 @@ from pykeen.models.cli import options
 from pykeen.optimizers import optimizer_resolver
 from pykeen.sampling import NegativeSampler
 from pykeen.training import LCWATrainingLoop, SLCWATrainingLoop
+from pykeen.training.lcwa import create_lcwa_instances
+from pykeen.training.slcwa import create_slcwa_instances
 from pykeen.triples.triples_factory import CoreTriplesFactory
-from pykeen.typing import InductiveMode, OneOrSequence
+from pykeen.typing import FloatTensor, InductiveMode, LongTensor, OneOrSequence
 
 __all__ = [
     "LitModule",
@@ -118,7 +118,7 @@ class LitModule(pytorch_lightning.LightningModule):
         self.mode = mode
         self.label_smoothing = label_smoothing
 
-    def forward(self, hr_batch: torch.LongTensor) -> torch.FloatTensor:
+    def forward(self, hr_batch: LongTensor) -> FloatTensor:
         """
         Perform the prediction or inference step by wrapping :meth:`pykeen.models.ERModel.predict_t`.
 
@@ -215,11 +215,10 @@ class SLCWALitModule(LitModule):
         return loss
 
     # docstr-coverage: inherited
-    def _dataloader(
-        self, triples_factory: CoreTriplesFactory, shuffle: bool = False
-    ) -> torch.utils.data.DataLoader:  # noqa: D102
+    def _dataloader(self, triples_factory: CoreTriplesFactory, shuffle: bool = False) -> torch.utils.data.DataLoader:  # noqa: D102
         return torch.utils.data.DataLoader(
-            dataset=triples_factory.create_slcwa_instances(
+            dataset=create_slcwa_instances(
+                triples_factory,
                 batch_size=self.batch_size,
                 # TODO:
                 # shuffle=shuffle,
@@ -260,16 +259,15 @@ class LCWALitModule(LitModule):
         return loss
 
     # docstr-coverage: inherited
-    def _dataloader(
-        self, triples_factory: CoreTriplesFactory, shuffle: bool = False
-    ) -> torch.utils.data.DataLoader:  # noqa: D102
+    def _dataloader(self, triples_factory: CoreTriplesFactory, shuffle: bool = False) -> torch.utils.data.DataLoader:  # noqa: D102
         return torch.utils.data.DataLoader(
-            dataset=triples_factory.create_lcwa_instances(),
+            dataset=create_lcwa_instances(triples_factory),
             batch_size=self.batch_size,
             shuffle=shuffle,
         )
 
 
+#: A resolver for PyTorch Lightning training modules
 lit_module_resolver: ClassResolver[LitModule] = ClassResolver.from_subclasses(
     base=LitModule,
     default=SLCWALitModule,

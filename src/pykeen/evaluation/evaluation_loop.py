@@ -1,12 +1,11 @@
-# -*- coding: utf-8 -*-
-
 """Evaluation loops for KGE models."""
 
 import dataclasses
 import logging
 from abc import abstractmethod
 from collections import defaultdict
-from typing import Any, Collection, DefaultDict, Generic, Iterable, List, Mapping, Optional, Tuple, TypeVar, Union, cast
+from collections.abc import Collection, Iterable, Mapping
+from typing import Any, Generic, Optional, TypeVar, Union
 
 import numpy
 import pandas
@@ -22,8 +21,8 @@ from .evaluator import Evaluator, MetricResults, filter_scores_
 from ..constants import COLUMN_LABELS, TARGET_TO_INDEX
 from ..models import Model
 from ..triples import CoreTriplesFactory, get_mapped_triples
-from ..typing import LABEL_HEAD, LABEL_TAIL, InductiveMode, MappedTriples, OneOrSequence, Target
-from ..utils import upgrade_to_sequence
+from ..typing import LABEL_HEAD, LABEL_TAIL, InductiveMode, LongTensor, MappedTriples, OneOrSequence, Target
+from ..utils import determine_maximum_batch_size, upgrade_to_sequence
 
 __all__ = [
     "AdditionalFilterTriplesHint",
@@ -70,7 +69,7 @@ def _evaluate(
     Run the evaluation loop for a given batch size.
 
     .. note::
-        this method is wrapped into a `MemoryUtilizationMaximizer` instance to automatically tune the `batch_size`.
+        This method is wrapped into a `MemoryUtilizationMaximizer` instance to automatically tune the `batch_size`.
 
     :param loop:
         the evaluation loop instance.
@@ -193,11 +192,9 @@ class EvaluationLoop(Generic[BatchType]):
             the evaluation results.
         """
         # set upper limit of batch size for automatic memory optimization
-        if not batch_size:
-            if self.model.device.type == "cpu":
-                batch_size = 32
-            else:
-                batch_size = len(self.dataset)
+        batch_size = determine_maximum_batch_size(
+            batch_size=batch_size, device=self.model.device, maximum_batch_size=len(self.dataset)
+        )
         # set model to evaluation mode
         self.model.eval()
         # delegate to AMO wrapper
@@ -221,7 +218,7 @@ class FilterIndex:
     bounds: numpy.ndarray
 
     #: the concatenation of unique targets for each key (use bounds to select appropriate sub-array)
-    indices: torch.LongTensor
+    indices: LongTensor
 
     @classmethod
     def from_df(cls, df: pandas.DataFrame, target: Target) -> "FilterIndex":
@@ -257,7 +254,7 @@ class FilterIndex:
             indices.extend(unique_targets)
             bounds.append(len(indices))
         # convert lists to arrays
-        indices = cast(torch.LongTensor, torch.as_tensor(indices))
+        indices = torch.as_tensor(indices)
         bounds = numpy.asarray(bounds)
         # instantiate
         return cls(triple_id_to_key_id=triple_id_to_key_id, bounds=bounds, indices=indices)
@@ -269,7 +266,7 @@ class FilterIndex:
         return self.indices[low:high]
 
 
-class LCWAEvaluationDataset(Dataset[Mapping[Target, Tuple[MappedTriples, Optional[torch.Tensor]]]]):
+class LCWAEvaluationDataset(Dataset[Mapping[Target, tuple[MappedTriples, Optional[torch.Tensor]]]]):
     """A dataset for link prediction evaluation."""
 
     filter_indices: Optional[Mapping[Target, FilterIndex]]
@@ -335,7 +332,7 @@ class LCWAEvaluationDataset(Dataset[Mapping[Target, Tuple[MappedTriples, Optiona
     def __len__(self) -> int:  # noqa: D105
         return self.num_triples * self.num_targets
 
-    def __getitem__(self, index: int) -> Tuple[Target, MappedTriples, Optional[torch.LongTensor]]:  # noqa: D105
+    def __getitem__(self, index: int) -> tuple[Target, MappedTriples, Optional[LongTensor]]:  # noqa: D105
         # sorted by target -> most of the batches only have a single target
         target_id, index = divmod(index, self.num_triples)
         target = self.targets[target_id]
@@ -345,12 +342,12 @@ class LCWAEvaluationDataset(Dataset[Mapping[Target, Tuple[MappedTriples, Optiona
 
     @staticmethod
     def collate(
-        batch: Iterable[Tuple[Target, MappedTriples, Optional[torch.LongTensor]]]
-    ) -> Mapping[Target, Tuple[MappedTriples, Optional[torch.Tensor]]]:
+        batch: Iterable[tuple[Target, MappedTriples, Optional[LongTensor]]],
+    ) -> Mapping[Target, tuple[MappedTriples, Optional[torch.Tensor]]]:
         """Collate batches by grouping by target."""
         # group by target
-        triples: DefaultDict[Target, List[torch.LongTensor]] = defaultdict(list)
-        nnz: DefaultDict[Target, List[torch.LongTensor]] = defaultdict(list)
+        triples: defaultdict[Target, list[LongTensor]] = defaultdict(list)
+        nnz: defaultdict[Target, list[LongTensor]] = defaultdict(list)
         for target, triple, opt_nnz in batch:
             triples[target].append(triple)
             if opt_nnz is not None:
@@ -359,7 +356,7 @@ class LCWAEvaluationDataset(Dataset[Mapping[Target, Tuple[MappedTriples, Optiona
         # stack groups into a single tensor
         result = {}
         for target in triples.keys():
-            target_triples = cast(MappedTriples, torch.stack(triples[target]))
+            target_triples = torch.stack(triples[target])
             if target in nnz:
                 batch_ids = []
                 target_nnz = nnz[target]

@@ -1,10 +1,9 @@
-# -*- coding: utf-8 -*-
-
 """Anchor search for NodePiece."""
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Iterable, Optional
+from collections.abc import Iterable
+from typing import Optional
 
 import numpy
 import scipy.sparse
@@ -304,9 +303,7 @@ class SparseBFSSearcher(AnchorSearcher):
         # symmetric + self-loops
         edge_list = torch.cat(
             [edge_index, edge_index.flip(0), torch.arange(num_entities).unsqueeze(0).repeat(2, 1)], dim=-1
-        ).unique(
-            dim=1
-        )  # unique for deduplicating repeated edges
+        ).unique(dim=1)  # unique for deduplicating repeated edges
 
         return edge_list
 
@@ -542,6 +539,7 @@ class PersonalizedPageRankAnchorSearcher(AnchorSearcher):
             yield ppr[:, anchors.to(ppr.device)]
 
 
+#: A resolver for NodePiece anchor searchers
 anchor_searcher_resolver: ClassResolver[AnchorSearcher] = ClassResolver.from_subclasses(
     base=AnchorSearcher,
     default=CSGraphAnchorSearcher,

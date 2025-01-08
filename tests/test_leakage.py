@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 """Tests for leakage analysis."""
 
 import itertools as itt
@@ -83,9 +81,9 @@ class TestLeakage(unittest.TestCase):
         )
 
         sealant = Sealant(train_factory, symmetric=False, minimum_frequency=min_frequency)
-        test_relation_id, test_relation_inverse_id = [
+        test_relation_id, test_relation_inverse_id = (
             train_factory.relation_to_id[r] for r in (test_relation, test_relation_inverse)
-        ]
+        )
         self.assertNotEqual(
             0,
             len(sealant.candidate_inverse_relations),
@@ -193,7 +191,7 @@ class TestLeakage(unittest.TestCase):
     def test_jaccard_similarity_scipy(self):
         """Test :func:`jaccard_similarity_scipy`."""
         triples_factory = Nations().training
-        rel, inv = triples_factory_to_sparse_matrices(triples_factory)
+        rel = triples_factory_to_sparse_matrices(triples_factory)[0]
         sim = jaccard_similarity_scipy(a=rel, b=rel)
         # check type
         assert isinstance(sim, numpy.ndarray)

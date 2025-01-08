@@ -1,8 +1,7 @@
-# -*- coding: utf-8 -*-
-
 """Implementation of PairRE."""
 
-from typing import Any, ClassVar, Mapping, Optional, Type
+from collections.abc import Mapping
+from typing import Any, ClassVar, Optional
 
 from torch.nn import functional
 from torch.nn.init import uniform_
@@ -11,15 +10,21 @@ from ..nbase import ERModel
 from ...constants import DEFAULT_EMBEDDING_HPO_EMBEDDING_DIM_RANGE
 from ...losses import Loss, NSSALoss
 from ...nn.modules import PairREInteraction
-from ...typing import Hint, Initializer, Normalizer
+from ...typing import FloatTensor, Hint, Initializer, Normalizer
 
 __all__ = [
     "PairRE",
 ]
 
 
-class PairRE(ERModel):
+class PairRE(ERModel[FloatTensor, tuple[FloatTensor, FloatTensor], FloatTensor]):
     r"""An implementation of PairRE from [chao2020]_.
+
+    This model represents entities as $d$-dimensional vectors, and relations by a pair of $d$-dimensional vectors,
+    all stored in an :class:`~pykeen.nn.representation.Embedding` matrix. Moreover, it enforces unit length for
+    the entity embeddings.
+
+    The representations are then passed to the :class:`~pykeen.nn.modules.PairREInteraction` function to obtain scores.
 
     ---
     citation:
@@ -36,7 +41,7 @@ class PairRE(ERModel):
     )
 
     #: the default loss function is the self-adversarial negative sampling loss
-    loss_default: ClassVar[Type[Loss]] = NSSALoss
+    loss_default: ClassVar[type[Loss]] = NSSALoss
     #: The default parameters for the default loss function class
     loss_default_kwargs: ClassVar[Optional[Mapping[str, Any]]] = dict(
         margin=12.0, adversarial_temperature=1.0, reduction="mean"
@@ -63,18 +68,25 @@ class PairRE(ERModel):
         relation_initializer_kwargs: Optional[Mapping[str, Any]] = None,
         **kwargs,
     ) -> None:
-        r"""Initialize PairRE via the :class:`pykeen.nn.modules.PairREInteraction` interaction.
+        r"""Initialize the model.
 
         :param embedding_dim: The entity embedding dimension $d$.
-        :param p: The $l_p$ norm.
-        :param power_norm: Should the power norm be used?
+
+        :param p:
+            The norm used with :func:`torch.linalg.vector_norm`. Typically is 1 or 2.
+        :param power_norm:
+            Whether to use the p-th power of the $L_p$ norm. It has the advantage of being differentiable around 0,
+            and numerically more stable.
+
         :param entity_initializer: Entity initializer function. Defaults to :func:`torch.nn.init.uniform_`
         :param entity_initializer_kwargs: Keyword arguments to be used when calling the entity initializer
         :param entity_normalizer: Entity normalizer function. Defaults to :func:`torch.nn.functional.normalize`
         :param entity_normalizer_kwargs: Keyword arguments to be used when calling the entity normalizer
+
         :param relation_initializer: Relation initializer function. Defaults to :func:`torch.nn.init.uniform_`
         :param relation_initializer_kwargs: Keyword arguments to be used when calling the relation initializer
-        :param kwargs: Remaining keyword arguments passed through to :class:`pykeen.models.ERModel`.
+
+        :param kwargs: Remaining keyword arguments passed through to :class:`~pykeen.models.ERModel`.
         """
         entity_normalizer_kwargs = _resolve_kwargs(
             kwargs=entity_normalizer_kwargs,
