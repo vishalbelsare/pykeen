@@ -1,12 +1,11 @@
-# -*- coding: utf-8 -*-
-
 """Evaluation loops for KGE models."""
 
 import dataclasses
 import logging
 from abc import abstractmethod
 from collections import defaultdict
-from typing import Any, Collection, DefaultDict, Generic, Iterable, List, Mapping, Optional, Tuple, TypeVar, Union, cast
+from collections.abc import Collection, Iterable, Mapping
+from typing import Any, Generic, TypeAlias, TypeVar
 
 import numpy
 import pandas
@@ -16,14 +15,13 @@ from torch.utils.data import Dataset
 from torch.utils.data.dataloader import DataLoader
 from torch_max_mem import maximize_memory_utilization
 from tqdm.auto import tqdm
-from typing_extensions import TypeAlias
 
 from .evaluator import Evaluator, MetricResults, filter_scores_
 from ..constants import COLUMN_LABELS, TARGET_TO_INDEX
 from ..models import Model
 from ..triples import CoreTriplesFactory, get_mapped_triples
-from ..typing import LABEL_HEAD, LABEL_TAIL, InductiveMode, MappedTriples, OneOrSequence, Target
-from ..utils import upgrade_to_sequence
+from ..typing import LABEL_HEAD, LABEL_TAIL, InductiveMode, LongTensor, MappedTriples, OneOrSequence, Target
+from ..utils import determine_maximum_batch_size, upgrade_to_sequence
 
 __all__ = [
     "AdditionalFilterTriplesHint",
@@ -37,20 +35,17 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 BatchType = TypeVar("BatchType")
-AdditionalFilterTriplesHint: TypeAlias = Optional[OneOrSequence[Union[MappedTriples, CoreTriplesFactory]]]
+AdditionalFilterTriplesHint: TypeAlias = OneOrSequence[MappedTriples | CoreTriplesFactory] | None
 
 
 def _hasher(d: Mapping[str, Any]) -> int:
-    """
-    Calculate hash based on ID of dataset.
+    """Calculate hash based on ID of dataset.
 
     This means that we can have separate batch sizes for different evaluation datasets.
 
-    :param d:
-        the dictionary of keyword-based parameters
+    :param d: the dictionary of keyword-based parameters
 
-    :return:
-        the dataset's ID
+    :returns: the dataset's ID
     """
     obj = d["loop"]
     assert isinstance(obj, EvaluationLoop)
@@ -66,25 +61,19 @@ def _evaluate(
     tqdm_kwargs: OptionalKwargs,
     **kwargs,
 ) -> MetricResults:
-    """
-    Run the evaluation loop for a given batch size.
+    """Run the evaluation loop for a given batch size.
 
     .. note::
-        this method is wrapped into a `MemoryUtilizationMaximizer` instance to automatically tune the `batch_size`.
 
-    :param loop:
-        the evaluation loop instance.
-    :param batch_size:
-        the batch size
-    :param use_tqdm:
-        whether to use tqdm progress bar
-    :param tqdm_kwargs:
-        additional keyword-based parameters for the progress bar
-    :param kwargs:
-        additional keyword-based parameters passed to :meth:`EvaluationLoop.get_loader`
+        This method is wrapped into a `MemoryUtilizationMaximizer` instance to automatically tune the `batch_size`.
 
-    :return:
-        the evaluation results
+    :param loop: the evaluation loop instance.
+    :param batch_size: the batch size
+    :param use_tqdm: whether to use tqdm progress bar
+    :param tqdm_kwargs: additional keyword-based parameters for the progress bar
+    :param kwargs: additional keyword-based parameters passed to :meth:`EvaluationLoop.get_loader`
+
+    :returns: the evaluation results
     """
     loop.model.eval()
     loader = loop.get_loader(batch_size=batch_size, **kwargs)
@@ -112,15 +101,11 @@ class EvaluationLoop(Generic[BatchType]):
         dataset: Dataset[BatchType],
         evaluator: Evaluator,
     ) -> None:
-        """
-        Initialize the evaluation loop.
+        """Initialize the evaluation loop.
 
-        :param model:
-            the model to evaluate.
-        :param dataset:
-            the evaluation dataset
-        :param evaluator:
-            the evaluator instance
+        :param model: the model to evaluate.
+        :param dataset: the evaluation dataset
+        :param evaluator: the evaluator instance
         """
         self.model = model
         self.evaluator = evaluator
@@ -128,11 +113,9 @@ class EvaluationLoop(Generic[BatchType]):
 
     @abstractmethod
     def process_batch(self, batch: BatchType) -> None:
-        """
-        Process a single batch.
+        """Process a single batch.
 
-        :param batch:
-            one batch of evaluation samples from the dataset.
+        :param batch: one batch of evaluation samples from the dataset.
         """
         raise NotImplementedError
 
@@ -141,18 +124,13 @@ class EvaluationLoop(Generic[BatchType]):
         return None
 
     def get_loader(self, batch_size: int, pin_memory: bool = True, **kwargs) -> DataLoader:
-        """
-        Create a data loader for a single evaluation round.
+        """Create a data loader for a single evaluation round.
 
-        :param batch_size:
-            the batch size
-        :param pin_memory:
-            whether to pin memory, cf. :meth:`DataLoader.__init__`
-        :param kwargs:
-            additional keyword-based parameters passed to :meth:`DataLoader.__init__`
+        :param batch_size: the batch size
+        :param pin_memory: whether to pin memory, cf. :meth:`DataLoader.__init__`
+        :param kwargs: additional keyword-based parameters passed to :meth:`DataLoader.__init__`
 
-        :return:
-            a dataloader for the evaluation dataset of the given batch size
+        :returns: a dataloader for the evaluation dataset of the given batch size
         """
         return DataLoader(
             dataset=self.dataset,
@@ -167,37 +145,30 @@ class EvaluationLoop(Generic[BatchType]):
     def evaluate(
         self,
         # batch
-        batch_size: Optional[int] = None,
+        batch_size: int | None = None,
         # tqdm
         use_tqdm: bool = True,
         tqdm_kwargs: OptionalKwargs = None,
         # data loader
         **kwargs,
     ) -> MetricResults:
-        """
-        Evaluate the loop's model on the loop's dataset.
+        """Evaluate the loop's model on the loop's dataset.
 
         .. note::
+
             the contained model will be set to evaluation mode.
 
-        :param batch_size:
-            the batch size. If None, enable automatic memory optimization to maximize memory utilization.
-        :param use_tqdm:
-            whether to use tqdm progress bar
-        :param tqdm_kwargs:
-            additional keyword-based parameters passed to tqdm
-        :param kwargs:
-            additional keyword-based parameters passed to :meth:`get_loader`
+        :param batch_size: the batch size. If None, enable automatic memory optimization to maximize memory utilization.
+        :param use_tqdm: whether to use tqdm progress bar
+        :param tqdm_kwargs: additional keyword-based parameters passed to tqdm
+        :param kwargs: additional keyword-based parameters passed to :meth:`get_loader`
 
-        :return:
-            the evaluation results.
+        :returns: the evaluation results.
         """
         # set upper limit of batch size for automatic memory optimization
-        if not batch_size:
-            if self.model.device.type == "cpu":
-                batch_size = 32
-            else:
-                batch_size = len(self.dataset)
+        batch_size = determine_maximum_batch_size(
+            batch_size=batch_size, device=self.model.device, maximum_batch_size=len(self.dataset)
+        )
         # set model to evaluation mode
         self.model.eval()
         # delegate to AMO wrapper
@@ -221,23 +192,18 @@ class FilterIndex:
     bounds: numpy.ndarray
 
     #: the concatenation of unique targets for each key (use bounds to select appropriate sub-array)
-    indices: torch.LongTensor
+    indices: LongTensor
 
     @classmethod
     def from_df(cls, df: pandas.DataFrame, target: Target) -> "FilterIndex":
-        """
-        Create index from dataframe.
+        """Create index from dataframe.
 
-        :param df:
-            the dataframe, comprising columns [LABEL_HEAD, LABEL_RELATION, LABEL_TAIL]
-        :param target:
-            the prediction target
+        :param df: the dataframe, comprising columns [LABEL_HEAD, LABEL_RELATION, LABEL_TAIL]
+        :param target: the prediction target
 
-        :raises ValueError:
-            if some of the expected columns are missing
+        :returns: a filter index object
 
-        :return:
-            a filter index object
+        :raises ValueError: if some of the expected columns are missing
         """
         # input verification
         expected_columns = set(COLUMN_LABELS)
@@ -257,7 +223,7 @@ class FilterIndex:
             indices.extend(unique_targets)
             bounds.append(len(indices))
         # convert lists to arrays
-        indices = cast(torch.LongTensor, torch.as_tensor(indices))
+        indices = torch.as_tensor(indices)
         bounds = numpy.asarray(bounds)
         # instantiate
         return cls(triple_id_to_key_id=triple_id_to_key_id, bounds=bounds, indices=indices)
@@ -269,33 +235,27 @@ class FilterIndex:
         return self.indices[low:high]
 
 
-class LCWAEvaluationDataset(Dataset[Mapping[Target, Tuple[MappedTriples, Optional[torch.Tensor]]]]):
+class LCWAEvaluationDataset(Dataset[Mapping[Target, tuple[MappedTriples, torch.Tensor | None]]]):
     """A dataset for link prediction evaluation."""
 
-    filter_indices: Optional[Mapping[Target, FilterIndex]]
+    filter_indices: Mapping[Target, FilterIndex] | None
 
     def __init__(
         self,
         *,
-        mapped_triples: Optional[MappedTriples] = None,
-        factory: Optional[CoreTriplesFactory] = None,
-        targets: Optional[Collection[Target]] = None,
+        mapped_triples: MappedTriples | None = None,
+        factory: CoreTriplesFactory | None = None,
+        targets: Collection[Target] | None = None,
         filtered: bool = True,
         additional_filter_triples: AdditionalFilterTriplesHint = None,
     ) -> None:
-        """
-        Create a PyTorch dataset for link prediction evaluation.
+        """Create a PyTorch dataset for link prediction evaluation.
 
-        :param mapped_triples: shape: (n, 3)
-            the ID-based triples
-        :param factory:
-            the triples factory. Only used of `mapped_triples` is None
-        :param targets:
-            the prediction targets. Defaults to head and tail prediction
-        :param filtered:
-            whether to use filtered evaluation, i.e., prepare filter indices
-        :param additional_filter_triples:
-            additional filter triples to use for creating the filter
+        :param mapped_triples: shape: (n, 3) the ID-based triples
+        :param factory: the triples factory. Only used of `mapped_triples` is None
+        :param targets: the prediction targets. Defaults to head and tail prediction
+        :param filtered: whether to use filtered evaluation, i.e., prepare filter indices
+        :param additional_filter_triples: additional filter triples to use for creating the filter
         """
         super().__init__()
 
@@ -335,7 +295,7 @@ class LCWAEvaluationDataset(Dataset[Mapping[Target, Tuple[MappedTriples, Optiona
     def __len__(self) -> int:  # noqa: D105
         return self.num_triples * self.num_targets
 
-    def __getitem__(self, index: int) -> Tuple[Target, MappedTriples, Optional[torch.LongTensor]]:  # noqa: D105
+    def __getitem__(self, index: int) -> tuple[Target, MappedTriples, LongTensor | None]:  # noqa: D105
         # sorted by target -> most of the batches only have a single target
         target_id, index = divmod(index, self.num_triples)
         target = self.targets[target_id]
@@ -345,12 +305,12 @@ class LCWAEvaluationDataset(Dataset[Mapping[Target, Tuple[MappedTriples, Optiona
 
     @staticmethod
     def collate(
-        batch: Iterable[Tuple[Target, MappedTriples, Optional[torch.LongTensor]]]
-    ) -> Mapping[Target, Tuple[MappedTriples, Optional[torch.Tensor]]]:
+        batch: Iterable[tuple[Target, MappedTriples, LongTensor | None]],
+    ) -> Mapping[Target, tuple[MappedTriples, torch.Tensor | None]]:
         """Collate batches by grouping by target."""
         # group by target
-        triples: DefaultDict[Target, List[torch.LongTensor]] = defaultdict(list)
-        nnz: DefaultDict[Target, List[torch.LongTensor]] = defaultdict(list)
+        triples: defaultdict[Target, list[LongTensor]] = defaultdict(list)
+        nnz: defaultdict[Target, list[LongTensor]] = defaultdict(list)
         for target, triple, opt_nnz in batch:
             triples[target].append(triple)
             if opt_nnz is not None:
@@ -359,7 +319,7 @@ class LCWAEvaluationDataset(Dataset[Mapping[Target, Tuple[MappedTriples, Optiona
         # stack groups into a single tensor
         result = {}
         for target in triples.keys():
-            target_triples = cast(MappedTriples, torch.stack(triples[target]))
+            target_triples = torch.stack(triples[target])
             if target in nnz:
                 batch_ids = []
                 target_nnz = nnz[target]
@@ -376,8 +336,7 @@ class LCWAEvaluationDataset(Dataset[Mapping[Target, Tuple[MappedTriples, Optiona
 
 
 class LCWAEvaluationLoop(EvaluationLoop[Mapping[Target, MappedTriples]]):
-    r"""
-    Evaluation loop using 1:n scoring.
+    r"""Evaluation loop using 1:n scoring.
 
     For brevity, we only describe evaluation for tail prediction. Let $(h, r, t) \in \mathcal{T}_{eval}$ denote an
     evaluation triple. Then, we calculate scores for all triples $(h, r, t')$ with $t' \in \mathcal{E}$, i.e., for
@@ -390,28 +349,20 @@ class LCWAEvaluationLoop(EvaluationLoop[Mapping[Target, MappedTriples]]):
         evaluator: HintOrType[Evaluator] = None,
         evaluator_kwargs: OptionalKwargs = None,
         targets: Collection[Target] = (LABEL_HEAD, LABEL_TAIL),
-        mode: Optional[InductiveMode] = None,
+        mode: InductiveMode | None = None,
         additional_filter_triples: AdditionalFilterTriplesHint = None,
         **kwargs,
     ) -> None:
-        """
-        Initialize the evaluation loop.
+        """Initialize the evaluation loop.
 
-        :param triples_factory:
-            the evaluation triples factory
-        :param evaluator:
-            the evaluator, or a hint thereof
-        :param evaluator_kwargs:
-            additional keyword-based parameters for instantiating the evaluator
-        :param targets:
-            the prediction targets.
-        :param mode:
-            the inductive mode, or None for transductive evaluation
-        :param additional_filter_triples:
-            additional filter triples to use for creating the filter
-        :param kwargs:
-            additional keyword-based parameters passed to :meth:`EvaluationLoop.__init__`. Should not contain the keys
-            `dataset` or `evaluator`.
+        :param triples_factory: the evaluation triples factory
+        :param evaluator: the evaluator, or a hint thereof
+        :param evaluator_kwargs: additional keyword-based parameters for instantiating the evaluator
+        :param targets: the prediction targets.
+        :param mode: the inductive mode, or None for transductive evaluation
+        :param additional_filter_triples: additional filter triples to use for creating the filter
+        :param kwargs: additional keyword-based parameters passed to :meth:`EvaluationLoop.__init__`. Should not contain
+            the keys `dataset` or `evaluator`.
         """
         # avoid cyclic imports
         from . import evaluator_resolver

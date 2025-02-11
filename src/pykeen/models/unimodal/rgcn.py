@@ -1,30 +1,27 @@
-# -*- coding: utf-8 -*-
-
 """Implementation of the R-GCN model."""
 
-from typing import Any, Mapping, Optional
+from collections.abc import Mapping
+from typing import Any
 
-import torch
 from class_resolver import Hint, HintOrType
 from torch import nn
 
 from ..nbase import ERModel
+from ...constants import DEFAULT_DROPOUT_HPO_RANGE, DEFAULT_EMBEDDING_HPO_EMBEDDING_DIM_RANGE
 from ...nn.message_passing import Decomposition, RGCNRepresentation
 from ...nn.modules import Interaction
 from ...nn.representation import Representation
 from ...nn.weighting import EdgeWeighting
 from ...regularizers import Regularizer
 from ...triples import CoreTriplesFactory
-from ...typing import Initializer, RelationRepresentation
+from ...typing import FloatTensor, Initializer, RelationRepresentation
 
 __all__ = [
     "RGCN",
 ]
 
 
-class RGCN(
-    ERModel[torch.FloatTensor, RelationRepresentation, torch.FloatTensor],
-):
+class RGCN(ERModel[FloatTensor, RelationRepresentation, FloatTensor]):
     r"""An implementation of R-GCN from [schlichtkrull2018]_.
 
     The Relational Graph Convolutional Network (R-GCN) comprises three parts:
@@ -62,18 +59,17 @@ class RGCN(
         github: https://github.com/MichSchli/RelationPrediction
     """
 
-    #: The default strategy for optimizing the model"s hyper-parameters
+    #: The default strategy for optimizing the model's hyper-parameters
     hpo_default = dict(
-        embedding_dim=dict(type=int, low=32, high=512, q=32),
+        embedding_dim=DEFAULT_EMBEDDING_HPO_EMBEDDING_DIM_RANGE,
         num_layers=dict(type=int, low=1, high=5, q=1),
         use_bias=dict(type="bool"),
-        use_batch_norm=dict(type="bool"),
-        activation_cls=dict(type="categorical", choices=[nn.ReLU, nn.LeakyReLU]),
+        activation=dict(type="categorical", choices=[nn.ReLU, nn.LeakyReLU]),
         interaction=dict(type="categorical", choices=["distmult", "complex", "ermlp"]),
-        edge_dropout=dict(type=float, low=0.0, high=0.9),
-        self_loop_dropout=dict(type=float, low=0.0, high=0.9),
+        edge_dropout=DEFAULT_DROPOUT_HPO_RANGE,
+        self_loop_dropout=DEFAULT_DROPOUT_HPO_RANGE,
         edge_weighting=dict(type="categorical", choices=["inverse_in_degree", "inverse_out_degree", "symmetric"]),
-        decomposition=dict(type="categorical", choices=["bases", "blocks"]),
+        decomposition=dict(type="categorical", choices=["bases", "block"]),
         # TODO: Decomposition kwargs
         # num_bases=dict(type=int, low=2, high=100, q=1),
         # num_blocks=dict(type=int, low=2, high=20, q=1),
@@ -87,22 +83,22 @@ class RGCN(
         num_layers: int = 2,
         # https://github.com/MichSchli/RelationPrediction/blob/c77b094fe5c17685ed138dae9ae49b304e0d8d89/code/encoders/affine_transform.py#L24-L28
         base_entity_initializer: Hint[Initializer] = nn.init.xavier_uniform_,
-        base_entity_initializer_kwargs: Optional[Mapping[str, Any]] = None,
+        base_entity_initializer_kwargs: Mapping[str, Any] | None = None,
         relation_representations: HintOrType[Representation] = None,
         relation_initializer: Hint[Initializer] = nn.init.xavier_uniform_,
-        relation_initializer_kwargs: Optional[Mapping[str, Any]] = None,
-        interaction: HintOrType[Interaction[torch.FloatTensor, RelationRepresentation, torch.FloatTensor]] = "DistMult",
-        interaction_kwargs: Optional[Mapping[str, Any]] = None,
+        relation_initializer_kwargs: Mapping[str, Any] | None = None,
+        interaction: HintOrType[Interaction[FloatTensor, RelationRepresentation, FloatTensor]] = "DistMult",
+        interaction_kwargs: Mapping[str, Any] | None = None,
         use_bias: bool = True,
         activation: Hint[nn.Module] = None,
-        activation_kwargs: Optional[Mapping[str, Any]] = None,
+        activation_kwargs: Mapping[str, Any] | None = None,
         edge_dropout: float = 0.4,
         self_loop_dropout: float = 0.2,
         edge_weighting: Hint[EdgeWeighting] = None,
         decomposition: Hint[Decomposition] = None,
-        decomposition_kwargs: Optional[Mapping[str, Any]] = None,
+        decomposition_kwargs: Mapping[str, Any] | None = None,
         regularizer: Hint[Regularizer] = None,
-        regularizer_kwargs: Optional[Mapping[str, Any]] = None,
+        regularizer_kwargs: Mapping[str, Any] | None = None,
         **kwargs,
     ):
         """
