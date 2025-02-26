@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 """PyKEEN internal "nn" module."""
 
 from class_resolver import ClassResolver
@@ -14,6 +12,7 @@ from .combination import (
     GatedCombination,
 )
 from .message_passing import RGCNRepresentation
+from .meta import FeatureEnrichedEmbedding, MLPTransformedRepresentation
 from .modules import (
     AutoSFInteraction,
     BoxEInteraction,
@@ -49,7 +48,7 @@ from .modules import (
     TransHInteraction,
     TransRInteraction,
     TripleREInteraction,
-    TuckerInteraction,
+    TuckERInteraction,
     UMInteraction,
     interaction_resolver,
 )
@@ -65,7 +64,10 @@ from .representation import (
     CachedTextRepresentation,
     CombinedRepresentation,
     Embedding,
+    EmbeddingBagRepresentation,
     LowRankRepresentation,
+    MultiBackfillRepresentation,
+    Partition,
     PartitionRepresentation,
     Representation,
     SingleCompGCNRepresentation,
@@ -87,6 +89,9 @@ __all__ = [
     "LowRankRepresentation",
     "NodePieceRepresentation",
     "PartitionRepresentation",
+    "Partition",
+    "EmbeddingBagRepresentation",
+    "MultiBackfillRepresentation",
     "BackfillRepresentation",
     "RGCNRepresentation",
     "SimpleMessagePassingRepresentation",
@@ -95,6 +100,7 @@ __all__ = [
     "TokenizationRepresentation",
     "TypedMessagePassingRepresentation",
     "FeaturizedMessagePassingRepresentation",
+    "FeatureEnrichedEmbedding",
     "CombinedRepresentation",
     "TensorTrainRepresentation",
     "TextRepresentation",
@@ -103,6 +109,7 @@ __all__ = [
     "BiomedicalCURIERepresentation",
     "VisualRepresentation",
     "WikidataVisualRepresentation",
+    "MLPTransformedRepresentation",
     "tokenizer_resolver",
     "representation_resolver",
     # INITIALIZER
@@ -144,7 +151,7 @@ __all__ = [
     "TransHInteraction",
     "TransRInteraction",
     "TripleREInteraction",
-    "TuckerInteraction",
+    "TuckERInteraction",
     "UMInteraction",
     "interaction_resolver",
     # combinations
@@ -156,6 +163,7 @@ __all__ = [
     "GatedCombination",
 ]
 
+#: A resolver for representations
 representation_resolver: ClassResolver[Representation] = ClassResolver.from_subclasses(
     base=Representation,
     default=Embedding,

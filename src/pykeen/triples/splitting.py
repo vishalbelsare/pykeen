@@ -1,11 +1,9 @@
-# -*- coding: utf-8 -*-
-
 """Implementation of triples splitting functions."""
 
 import logging
 import typing
 from abc import abstractmethod
-from typing import Collection, Optional, Sequence, Set, Tuple, Type, Union
+from collections.abc import Collection, Sequence
 
 import numpy
 import pandas
@@ -13,20 +11,75 @@ import torch
 from class_resolver.api import ClassResolver, HintOrType
 
 from ..constants import COLUMN_LABELS
-from ..typing import LABEL_HEAD, LABEL_RELATION, LABEL_TAIL, MappedTriples, Target, TorchRandomHint
-from ..utils import ensure_torch_random_state
+from ..typing import (
+    COLUMN_HEAD,
+    COLUMN_TAIL,
+    LABEL_HEAD,
+    LABEL_RELATION,
+    LABEL_TAIL,
+    BoolTensor,
+    LongTensor,
+    MappedTriples,
+    Target,
+    TorchRandomHint,
+)
+from ..utils import ensure_torch_random_state, format_relative_comparison
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "split",
+    # Cleaners
+    "cleaner_resolver",
+    "Cleaner",
+    "RandomizedCleaner",
+    "DeterministicCleaner",
+    # Splitters
+    "splitter_resolver",
+    "Splitter",
+    "CleanupSplitter",
+    "CoverageSplitter",
+    # Utils
+    "TripleCoverageError",
+    "normalize_ratios",
+    "get_absolute_split_sizes",
 ]
+
+
+def _random_split_tensor(
+    x: LongTensor,
+    sizes: Sequence[int],
+    generator: torch.Generator | None = None,
+) -> Sequence[LongTensor]:
+    """Randomly split a tensor into parts of the given sizes."""
+    # input verification
+    n = x.shape[0]
+    if sum(sizes) != n:
+        raise ValueError(f"Received {x.shape[0]=:_}, but the sizes sum up to {sum(sizes):_}")
+
+    # split indices
+    permutation = torch.randperm(n, generator=generator)
+    index_groups = permutation.split(split_size=sizes, dim=0)
+
+    # split tensor
+    return [x[index_group] for index_group in index_groups]
+
+
+def _random_split_unique_values(
+    id_tensor: LongTensor,
+    ratios: Sequence[float],
+    generator: torch.Generator | None = None,
+) -> Sequence[LongTensor]:
+    """Randomly split the unique values in a tensor according to the given ratios."""
+    unique_ids = id_tensor.unique()
+    sizes = get_absolute_split_sizes(n_total=len(unique_ids), ratios=ratios)
+    return _random_split_tensor(x=unique_ids, sizes=sizes, generator=generator)
 
 
 def _split_triples(
     mapped_triples: MappedTriples,
     sizes: Sequence[int],
-    random_state: TorchRandomHint = None,
+    generator: torch.Generator | None = None,
 ) -> Sequence[MappedTriples]:
     """
     Randomly split triples into groups of given sizes.
@@ -35,42 +88,29 @@ def _split_triples(
         The triples.
     :param sizes:
         The sizes.
-    :param random_state:
-        The random state for reproducible splits.
+    :param generator:
+        The random number generator for reproducible splits.
 
     :return:
         The splitted triples.
-
-    :raises ValueError:
-        If the given sizes are different from the number of triples in mapped triples
     """
-    num_triples = mapped_triples.shape[0]
-    if sum(sizes) != num_triples:
-        raise ValueError(f"Received {num_triples} triples, but the sizes sum up to {sum(sizes)}")
-
-    # Split indices
-    idx = torch.randperm(num_triples, generator=random_state)
-    idx_groups = idx.split(split_size=sizes, dim=0)
-
-    # Split triples
-    triples_groups = [mapped_triples[idx] for idx in idx_groups]
+    triples_groups = _random_split_tensor(mapped_triples, sizes=sizes, generator=generator)
     logger.info(
         "done splitting triples to groups of sizes %s",
         [triples.shape[0] for triples in triples_groups],
     )
-
     return triples_groups
 
 
-def _get_cover_for_column(df: pandas.DataFrame, column: Target, index_column: str = "index") -> Set[int]:
+def _get_cover_for_column(df: pandas.DataFrame, column: Target, index_column: str = "index") -> set[int]:
     return set(df.groupby(by=column).agg({index_column: "min"})[index_column].values)
 
 
-def _get_covered_entities(df: pandas.DataFrame, chosen: Collection[int]) -> Set[int]:
+def _get_covered_entities(df: pandas.DataFrame, chosen: Collection[int]) -> set[int]:
     return set(numpy.unique(df.loc[df["index"].isin(chosen), [LABEL_HEAD, LABEL_TAIL]]))
 
 
-def _get_cover_deterministic(triples: MappedTriples) -> torch.BoolTensor:
+def _get_cover_deterministic(triples: MappedTriples) -> BoolTensor:
     """
     Get a coverage mask for all entities and relations.
 
@@ -93,9 +133,6 @@ def _get_cover_deterministic(triples: MappedTriples) -> torch.BoolTensor:
 
     # select one triple per relation
     chosen = _get_cover_for_column(df=df, column=LABEL_RELATION)
-
-    # maintain set of covered entities
-    covered = _get_covered_entities(df=df, chosen=chosen)
 
     # Select one triple for each head/tail entity, which is not yet covered.
     for column in (LABEL_HEAD, LABEL_TAIL):
@@ -130,9 +167,9 @@ class TripleCoverageError(RuntimeError):
 
 
 def normalize_ratios(
-    ratios: Union[float, Sequence[float]],
+    ratios: float | Sequence[float],
     epsilon: float = 1.0e-06,
-) -> Tuple[float, ...]:
+) -> tuple[float, ...]:
     """Normalize relative sizes.
 
     If the sum is smaller than 1, adds (1 - sum)
@@ -163,7 +200,7 @@ def normalize_ratios(
 def get_absolute_split_sizes(
     n_total: int,
     ratios: Sequence[float],
-) -> Tuple[int, ...]:
+) -> tuple[int, ...]:
     """
     Compute absolute sizes of splits from given relative sizes.
 
@@ -196,7 +233,7 @@ class Cleaner:
         reference: MappedTriples,
         other: MappedTriples,
         random_state: TorchRandomHint,
-    ) -> Tuple[MappedTriples, MappedTriples]:
+    ) -> tuple[MappedTriples, MappedTriples]:
         """
         Clean up one set of triples with respect to a reference set.
 
@@ -229,8 +266,8 @@ class Cleaner:
 def _prepare_cleanup(
     training: MappedTriples,
     testing: MappedTriples,
-    max_ids: Optional[Tuple[int, int]] = None,
-) -> torch.BoolTensor:
+    max_ids: tuple[int, int] | None = None,
+) -> BoolTensor:
     """
     Calculate a mask for the test triples with triples containing test-only entities or relations.
 
@@ -254,10 +291,10 @@ def _prepare_cleanup(
     to_move_mask = torch.zeros(1, dtype=torch.bool)
     if max_ids is None:
         max_ids = typing.cast(
-            Tuple[int, int],
+            tuple[int, int],
             tuple(max(training[:, col].max().item(), testing[:, col].max().item()) + 1 for col in columns),
         )
-    for col, max_id in zip(columns, max_ids):
+    for col, max_id in zip(columns, max_ids, strict=False):
         # IDs not in training
         not_in_training_mask = torch.ones(max_id, dtype=torch.bool)
         not_in_training_mask[training[:, col].view(-1)] = False
@@ -282,7 +319,7 @@ class RandomizedCleaner(Cleaner):
         reference: MappedTriples,
         other: MappedTriples,
         random_state: TorchRandomHint,
-    ) -> Tuple[MappedTriples, MappedTriples]:  # noqa: D102
+    ) -> tuple[MappedTriples, MappedTriples]:  # noqa: D102
         generator = ensure_torch_random_state(random_state)
         move_id_mask = _prepare_cleanup(reference, other)
 
@@ -290,6 +327,8 @@ class RandomizedCleaner(Cleaner):
         while move_id_mask.any():
             # Pick a random triple to move over to the training triples
             (candidates,) = move_id_mask.nonzero(as_tuple=True)
+            # TODO: this could easily be extended to select a batch of triples
+            # -> speeds up the process at the cost of slightly larger movements
             idx = torch.randint(candidates.shape[0], size=(1,), generator=generator)
             idx = candidates[idx]
 
@@ -312,13 +351,14 @@ class DeterministicCleaner(Cleaner):
         reference: MappedTriples,
         other: MappedTriples,
         random_state: TorchRandomHint,
-    ) -> Tuple[MappedTriples, MappedTriples]:  # noqa: D102
+    ) -> tuple[MappedTriples, MappedTriples]:  # noqa: D102
         move_id_mask = _prepare_cleanup(reference, other)
         reference = torch.cat([reference, other[move_id_mask]])
         other = other[~move_id_mask]
         return reference, other
 
 
+#: A resolver for triple cleaners
 cleaner_resolver: ClassResolver[Cleaner] = ClassResolver.from_subclasses(base=Cleaner, default=DeterministicCleaner)
 
 
@@ -330,7 +370,7 @@ class Splitter:
         self,
         mapped_triples: MappedTriples,
         sizes: Sequence[int],
-        random_state: torch.Generator,
+        generator: torch.Generator,
     ) -> Sequence[MappedTriples]:
         """Split triples into clean groups.
 
@@ -341,7 +381,7 @@ class Splitter:
             the ID-based triples
         :param sizes:
             the absolute number of triples for each split part.
-        :param random_state:
+        :param generator:
             the random state used for splitting
 
         :return:
@@ -353,7 +393,7 @@ class Splitter:
         self,
         *,
         mapped_triples: MappedTriples,
-        ratios: Union[float, Sequence[float]] = 0.8,
+        ratios: float | Sequence[float] = 0.8,
         random_state: TorchRandomHint = None,
     ) -> Sequence[MappedTriples]:
         """Split triples into clean groups.
@@ -375,15 +415,11 @@ class Splitter:
         :return:
             A partition of triples, which are split (approximately) according to the ratios.
         """
-        random_state = ensure_torch_random_state(random_state)
+        generator = ensure_torch_random_state(random_state)
         ratios = normalize_ratios(ratios=ratios)
         sizes = get_absolute_split_sizes(n_total=mapped_triples.shape[0], ratios=ratios)
-        triples_groups = self.split_absolute_size(
-            mapped_triples=mapped_triples,
-            sizes=sizes,
-            random_state=random_state,
-        )
-        for i, (triples, exp_size, exp_ratio) in enumerate(zip(triples_groups, sizes, ratios)):
+        triples_groups = self.split_absolute_size(mapped_triples=mapped_triples, sizes=sizes, generator=generator)
+        for i, (triples, exp_size, exp_ratio) in enumerate(zip(triples_groups, sizes, ratios, strict=False)):
             actual_size = triples.shape[0]
             actual_ratio = actual_size / exp_size * exp_ratio
             if actual_size != exp_size:
@@ -418,16 +454,12 @@ class CleanupSplitter(Splitter):
         self,
         mapped_triples: MappedTriples,
         sizes: Sequence[int],
-        random_state: torch.Generator,
+        generator: torch.Generator,
     ) -> Sequence[MappedTriples]:  # noqa: D102
-        triples_groups = _split_triples(
-            mapped_triples,
-            sizes=sizes,
-            random_state=random_state,
-        )
+        triples_groups = _split_triples(mapped_triples, sizes=sizes, generator=generator)
         # Make sure that the first element has all the right stuff in it
         logger.debug("cleaning up groups")
-        triples_groups = self.cleaner(triples_groups, random_state=random_state)
+        triples_groups = self.cleaner(triples_groups, random_state=generator)
         logger.debug("done cleaning up groups")
         return triples_groups
 
@@ -440,7 +472,7 @@ class CoverageSplitter(Splitter):
         self,
         mapped_triples: MappedTriples,
         sizes: Sequence[int],
-        random_state: torch.Generator,
+        generator: torch.Generator,
     ) -> Sequence[MappedTriples]:  # noqa: D102
         seed_mask = _get_cover_deterministic(triples=mapped_triples)
         train_seed = mapped_triples[seed_mask]
@@ -448,23 +480,21 @@ class CoverageSplitter(Splitter):
         if train_seed.shape[0] > sizes[0]:
             raise ValueError(f"Could not find a coverage of all entities and relation with only {sizes[0]} triples.")
         remaining_sizes = (sizes[0] - train_seed.shape[0],) + tuple(sizes[1:])
-        train, *rest = _split_triples(
-            mapped_triples=remaining_triples,
-            sizes=remaining_sizes,
-            random_state=random_state,
-        )
+        train, *rest = _split_triples(mapped_triples=remaining_triples, sizes=remaining_sizes, generator=generator)
         return [torch.cat([train_seed, train], dim=0), *rest]
 
 
+#: A resolver for triple splitters
 splitter_resolver: ClassResolver[Splitter] = ClassResolver.from_subclasses(base=Splitter, default=CoverageSplitter)
 
 
 def split(
     mapped_triples: MappedTriples,
-    ratios: Union[float, Sequence[float]] = 0.8,
+    *,
+    ratios: float | Sequence[float] = 0.8,
     random_state: TorchRandomHint = None,
     randomize_cleanup: bool = False,
-    method: Optional[str] = None,
+    method: str | None = None,
 ) -> Sequence[MappedTriples]:
     """Split triples into clean groups.
 
@@ -485,7 +515,8 @@ def split(
         it does not necessarily have to move all of them, but it might be significantly slower since it moves one
         triple at a time.
     :param method:
-        The name of the method to use, cf. :data:`splitter_resolver`. Defaults to "coverage".
+        The name of the method to use, cf. :data:`splitter_resolver`. Defaults to "coverage", i.e.,
+        :class:`CoverageSplitter`.
 
     :return:
         A partition of triples, which are split (approximately) according to the ratios.
@@ -502,7 +533,7 @@ def split(
         train, test, val = split(triples, ratios)
     """
     # backwards compatibility
-    splitter_cls: Type[Splitter] = splitter_resolver.lookup(method)
+    splitter_cls: type[Splitter] = splitter_resolver.lookup(method)
     kwargs = dict()
     if splitter_cls is CleanupSplitter and randomize_cleanup:
         kwargs["cleaner"] = cleaner_resolver.normalize_cls(RandomizedCleaner)
@@ -511,3 +542,116 @@ def split(
         ratios=ratios,
         random_state=random_state,
     )
+
+
+def _entity_mask(mapped_triples: torch.Tensor, heads: torch.Tensor, tails: torch.Tensor) -> torch.Tensor:
+    head_mask = torch.isin(mapped_triples[:, COLUMN_HEAD], test_elements=heads)
+    tail_mask = torch.isin(mapped_triples[:, COLUMN_TAIL], test_elements=tails)
+    return head_mask & tail_mask
+
+
+def split_semi_inductive(
+    mapped_triples: MappedTriples,
+    *,
+    ratios: float | Sequence[float] = 0.8,
+    random_state: TorchRandomHint = None,
+) -> Sequence[MappedTriples]:
+    """Create a semi-inductive split, as defined by [ali2021]_.
+
+    In a semi-inductive split, we first split the entities into training and evaluation entities.
+    The training graph is then composed of all triples involving only training entities.
+    The evaluation graphs are built by looking at the triples that involve exactly one training
+    and one evaluation entity.
+
+    :param mapped_triples: shape: (n, 3)
+        The ID-based triples.
+    :param ratios:
+        The *entity* split ratio(s).
+    :param random_state:
+        The random state used to shuffle and split the triples.
+
+    :return:
+        A partition of triples, which are split (approximately) according to the ratios, stored TriplesFactory's
+        which share everything else with this root triples factory.
+    """
+    # normalize input
+    generator = ensure_torch_random_state(random_state=random_state)
+    ratios = normalize_ratios(ratios=ratios)
+
+    # split entities
+    train, *other = _random_split_unique_values(mapped_triples[:, 0::2], ratios=ratios, generator=generator)
+    sizes = [len(entities) for entities in [train, *other]]
+    logger.info(f"Entity split into groups of {sizes=}")
+
+    # extract training triples
+    result = [mapped_triples[_entity_mask(mapped_triples=mapped_triples, heads=train, tails=train)]]
+
+    # extract other triples
+    for other_entities in other:
+        train_head_to_other_tail = _entity_mask(mapped_triples=mapped_triples, heads=train, tails=other_entities)
+        other_head_to_train_tail = _entity_mask(mapped_triples=mapped_triples, heads=other_entities, tails=train)
+        mask = train_head_to_other_tail | other_head_to_train_tail
+        result.append(mapped_triples[mask])
+
+    # emit size information
+    sizes = [len(triples) for triples in result]
+    logger.info(
+        f"Triple split with {sizes=} managed to keep "
+        f"{format_relative_comparison(part=sum(sizes), total=len(mapped_triples))} original triples."
+    )
+    return result
+
+
+def split_fully_inductive(
+    mapped_triples: MappedTriples,
+    *,
+    entity_split_train_ratio: float = 0.5,
+    evaluation_triples_ratios: float | Sequence[float] = 0.8,
+    random_state: TorchRandomHint = None,
+) -> Sequence[MappedTriples]:
+    """Create a full-inductive split, as defined by [ali2021]_.
+
+    In a fully inductive split, we first split the entities into two disjoint sets:
+    training entities and inference entities. We use the induced subgraph of the training entities for training.
+    The triples of the inference graph are then further split into inference triples and evaluation triples.
+
+    :param mapped_triples: shape: (n, 3)
+        The ID-based triples.
+    :param entity_split_train_ratio:
+        The ratio of entities to use for the training part. The remainder will be used for the
+        inference/evaluation graph.
+    :param evaluation_triples_ratios:
+        The split ratio for the inference graph split.
+    :param random_state:
+        The random state used to shuffle and split the triples.
+
+    :return:
+        A (transductive) training triples factory, the inductive inference triples factory,
+        as well as the evaluation triples factories.
+    """
+    # normalize input
+    generator = ensure_torch_random_state(random_state=random_state)
+    evaluation_triples_ratios = normalize_ratios(ratios=evaluation_triples_ratios)
+
+    # split entities into training and inference
+    train, inference = _random_split_unique_values(
+        mapped_triples[:, 0::2], ratios=[entity_split_train_ratio, 1.0 - entity_split_train_ratio], generator=generator
+    )
+    logger.info(f"Entity split into {len(train):_} entities and {len(inference):_} inference entities.")
+
+    # extract training and inference triples
+    training_triples = mapped_triples[_entity_mask(mapped_triples=mapped_triples, heads=train, tails=train)]
+    inference_triples = mapped_triples[_entity_mask(mapped_triples=mapped_triples, heads=inference, tails=inference)]
+    num_train, num_inference = len(training_triples), len(inference_triples)
+    logger.info(
+        f"Extracted {num_train:_} training triples and {num_inference:_} inference triples. Managed to keep "
+        f"{format_relative_comparison(part=num_train + num_inference, total=len(mapped_triples))} of the original "
+        f"triples."
+    )
+
+    result = [training_triples]
+    # split inference triples
+    sizes = get_absolute_split_sizes(n_total=len(inference_triples), ratios=evaluation_triples_ratios)
+    result.extend(_split_triples(mapped_triples=inference_triples, sizes=sizes, generator=generator))
+
+    return result

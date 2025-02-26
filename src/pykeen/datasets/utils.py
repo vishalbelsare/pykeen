@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 """Dataset utilities."""
 
 import base64
@@ -7,7 +5,9 @@ import hashlib
 import logging
 import pathlib
 import re
-from typing import Any, Collection, Iterable, Mapping, Optional, Pattern, Tuple, Type, Union
+from collections.abc import Collection, Iterable, Mapping
+from re import Pattern
+from typing import Any
 
 import click
 from tqdm import tqdm
@@ -24,18 +24,19 @@ min_triples_option = click.option("--min-triples", type=int)
 
 
 def iter_dataset_classes(
-    regex_name_filter: Union[None, str, Pattern] = None,
+    regex_name_filter: None | str | Pattern = None,
     *,
-    max_triples: Optional[int] = None,
-    min_triples: Optional[int] = None,
+    max_triples: int | None = None,
+    min_triples: int | None = None,
     use_tqdm: bool = True,
-) -> Iterable[Tuple[str, Type[Dataset]]]:
+) -> Iterable[tuple[str, type[Dataset]]]:
     """Iterate over dataset classes with given constraints.
 
     :param regex_name_filter: An optional regular expression string or pre-compiled regular expression
     :param max_triples: An optional maximum number of triples for the dataset
     :param min_triples: An optional minimum number of triples for the dataset
     :param use_tqdm: Should a progress bar be shown?
+
     :yields: Pairs of dataset names and dataset classes
     """
     from . import dataset_resolver
@@ -64,18 +65,19 @@ def iter_dataset_classes(
 
 
 def iter_dataset_instances(
-    regex_name_filter: Union[None, str, Pattern] = None,
+    regex_name_filter: None | str | Pattern = None,
     *,
-    max_triples: Optional[int] = None,
-    min_triples: Optional[int] = None,
+    max_triples: int | None = None,
+    min_triples: int | None = None,
     use_tqdm: bool = True,
-) -> Iterable[Tuple[str, Dataset]]:
+) -> Iterable[tuple[str, Dataset]]:
     """Iterate over dataset instances with given constraints.
 
     :param regex_name_filter: An optional regular expression string or pre-compiled regular expression
     :param max_triples: An optional maximum number of triples for the dataset
     :param min_triples: An optional minimum number of triples for the dataset
     :param use_tqdm: Should a progress bar be shown?
+
     :yields: Pairs of dataset names and dataset instances
     """
     for name, cls in iter_dataset_classes(
@@ -90,26 +92,26 @@ def iter_dataset_instances(
 
 def get_dataset(
     *,
-    dataset: Union[None, str, pathlib.Path, Dataset, Type[Dataset]] = None,
-    dataset_kwargs: Optional[Mapping[str, Any]] = None,
-    training: Union[None, str, pathlib.Path, CoreTriplesFactory] = None,
-    testing: Union[None, str, pathlib.Path, CoreTriplesFactory] = None,
-    validation: Union[None, str, pathlib.Path, CoreTriplesFactory] = None,
+    dataset: None | str | pathlib.Path | Dataset | type[Dataset] = None,
+    dataset_kwargs: Mapping[str, Any] | None = None,
+    training: None | str | pathlib.Path | CoreTriplesFactory = None,
+    testing: None | str | pathlib.Path | CoreTriplesFactory = None,
+    validation: None | str | pathlib.Path | CoreTriplesFactory = None,
 ) -> Dataset:
     """Get a dataset, cached based on the given kwargs.
 
     :param dataset: The name of a dataset, an instance of a dataset, or the class for a dataset.
-    :param dataset_kwargs: The keyword arguments, only to be used when a class for a dataset is used for
-        the ``dataset`` keyword argument.
+    :param dataset_kwargs: The keyword arguments, only to be used when a class for a dataset is used for the ``dataset``
+        keyword argument.
     :param training: A triples factory for training triples or a path to a training triples file if ``dataset=None``
-    :param testing: A triples factory for testing triples or a path to a testing triples file  if ``dataset=None``
-    :param validation: A triples factory for validation triples or a path to a validation triples file
-        if ``dataset=None``
+    :param testing: A triples factory for testing triples or a path to a testing triples file if ``dataset=None``
+    :param validation: A triples factory for validation triples or a path to a validation triples file if
+        ``dataset=None``
+
     :returns: An instantiated dataset
 
     :raises ValueError: for incorrect usage of the input of the function
-    :raises TypeError: If a type is given for ``dataset`` but it's not a subclass of
-        :class:`pykeen.datasets.Dataset`
+    :raises TypeError: If a type is given for ``dataset`` but it's not a subclass of :class:`pykeen.datasets.Dataset`
     """
     from . import dataset_resolver, has_dataset
 
@@ -141,8 +143,8 @@ def get_dataset(
     if dataset is not None:
         raise TypeError(f"Dataset is invalid type: {type(dataset)}")
 
-    if isinstance(training, (str, pathlib.Path)) and isinstance(testing, (str, pathlib.Path)):
-        if validation is None or isinstance(validation, (str, pathlib.Path)):
+    if isinstance(training, str | pathlib.Path) and isinstance(testing, str | pathlib.Path):
+        if validation is None or isinstance(validation, str | pathlib.Path):
             return PathDataset(
                 training_path=training,
                 testing_path=testing,
@@ -194,7 +196,7 @@ def _set_inverse_triples_(dataset_instance: Dataset, create_inverse_triples: boo
 
 def _cached_get_dataset(
     dataset: str,
-    dataset_kwargs: Optional[Mapping[str, Any]],
+    dataset_kwargs: Mapping[str, Any] | None,
     force: bool = False,
 ) -> Dataset:
     """Get dataset by name, potentially using file-based cache."""

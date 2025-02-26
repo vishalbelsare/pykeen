@@ -1,16 +1,21 @@
-# -*- coding: utf-8 -*-
-
 """A wrapper which combines an interaction function with NodePiece entity representations."""
 
 import logging
-from typing import Iterable, Optional, Tuple, cast
+from collections.abc import Iterable
+from typing import cast
 
 import torch
 from torch import nn
 
 from .inductive_nodepiece import InductiveNodePiece
 from ...nn.representation import CompGCNLayer
-from ...typing import HeadRepresentation, InductiveMode, RelationRepresentation, TailRepresentation
+from ...typing import (
+    HeadRepresentation,
+    InductiveMode,
+    LongTensor,
+    RelationRepresentation,
+    TailRepresentation,
+)
 from ...utils import get_edge_index
 
 __all__ = [
@@ -35,16 +40,14 @@ class InductiveNodePieceGNN(InductiveNodePiece):
     def __init__(
         self,
         *,
-        gnn_encoder: Optional[Iterable[nn.Module]] = None,
+        gnn_encoder: Iterable[nn.Module] | None = None,
         **kwargs,
     ) -> None:
-        """
-        Initialize the model.
+        """Initialize the model.
 
-        :param gnn_encoder:
-            an iterable of message passing layers. Defaults to 2-layer CompGCN with Hadamard composition.
-        :param kwargs:
-            additional keyword-based parameters passed to `InductiveNodePiece.__init__`.
+        :param gnn_encoder: an iterable of message passing layers. Defaults to 2-layer CompGCN with Hadamard
+            composition.
+        :param kwargs: additional keyword-based parameters passed to `InductiveNodePiece.__init__`.
         """
         super().__init__(**kwargs)
 
@@ -83,9 +86,9 @@ class InductiveNodePieceGNN(InductiveNodePiece):
             self.register_buffer(name="testing_edge_index", tensor=inference_edge_index)
             self.register_buffer(name="testing_edge_type", tensor=inference_edge_type)
         else:
-            assert (
-                validation_factory is not None and test_factory is not None
-            ), "Validation and test factories must be triple factories"
+            assert validation_factory is not None and test_factory is not None, (
+                "Validation and test factories must be triple factories"
+            )
             self.register_buffer(
                 name="validation_edge_index", tensor=get_edge_index(triples_factory=validation_factory)
             )
@@ -103,11 +106,11 @@ class InductiveNodePieceGNN(InductiveNodePiece):
 
     def _get_representations(
         self,
-        h: Optional[torch.LongTensor],
-        r: Optional[torch.LongTensor],
-        t: Optional[torch.LongTensor],
-        mode: Optional[InductiveMode] = None,
-    ) -> Tuple[HeadRepresentation, RelationRepresentation, TailRepresentation]:
+        h: LongTensor | None,
+        r: LongTensor | None,
+        t: LongTensor | None,
+        mode: InductiveMode | None = None,
+    ) -> tuple[HeadRepresentation, RelationRepresentation, TailRepresentation]:
         """Get representations for head, relation and tails, in canonical shape with a GNN encoder."""
         entity_representations = self._get_entity_representations_from_inductive_mode(mode=mode)
 
@@ -134,6 +137,6 @@ class InductiveNodePieceGNN(InductiveNodePiece):
 
         # normalization
         return cast(
-            Tuple[HeadRepresentation, RelationRepresentation, TailRepresentation],
+            tuple[HeadRepresentation, RelationRepresentation, TailRepresentation],
             tuple(x[0] if len(x) == 1 else x for x in (hh, rr, tt)),
         )

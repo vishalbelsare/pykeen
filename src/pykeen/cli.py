@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 """A command line interface for PyKEEN.
 
 Why does this file exist, and why not put this in ``__main__``? You might be tempted to import things from ``__main__``
@@ -7,18 +5,21 @@ later, but that will cause problems - the code will get executed twice:
 
 - When you run ``python -m pykeen`` python will execute``__main__.py`` as a script. That means there won't be any
   ``pykeen.__main__`` in ``sys.modules``.
-- When you import __main__ it will get executed again (as a module) because
-  there's no ``pykeen.__main__`` in ``sys.modules``.
+- When you import __main__ it will get executed again (as a module) because there's no ``pykeen.__main__`` in
+  ``sys.modules``.
 
-.. seealso:: http://click.pocoo.org/5/setuptools/#setuptools-integration
+.. seealso::
+
+    http://click.pocoo.org/5/setuptools/#setuptools-integration
 """
 
 import importlib
 import inspect
 import os
 import sys
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Iterable, List, Mapping, Optional, Set, Tuple, Type, TypeVar, Union
+from typing import TypeVar
 
 import click
 from class_resolver import ClassResolver
@@ -52,7 +53,7 @@ from .sampling import negative_sampler_resolver
 from .stoppers import stopper_resolver
 from .trackers import tracker_resolver
 from .training import training_loop_resolver
-from .triples.utils import EXTENSION_IMPORTERS, PREFIX_IMPORTERS
+from .triples.utils import EXTENSION_IMPORTER_RESOLVER, PREFIX_IMPORTER_RESOLVER
 from .utils import get_until_first_blank, getattr_or_docdata
 from .version import env_table
 
@@ -87,17 +88,13 @@ def models(tablefmt: str):
     click.echo(_help_models(tablefmt=tablefmt)[0])
 
 
-def format_class(cls: Type, module: Optional[str] = None) -> str:
-    """
-    Generate the fully-qualified class name.
+def format_class(cls: type, module: str | None = None) -> str:
+    """Generate the fully-qualified class name.
 
-    :param cls:
-        the class
-    :param module:
-        the module name to use instead of `cls.__module__`
+    :param cls: the class
+    :param module: the module name to use instead of `cls.__module__`
 
-    :return:
-        the fully qualified class name
+    :returns: the fully qualified class name
     """
     if module is None:
         module = cls.__module__
@@ -111,18 +108,14 @@ def _citation(dd):
     return f"[{citation['author']} *et al.*, {citation['year']}]({citation['link']})"
 
 
-def _format_reference(reference: Optional[str], link_fmt: Optional[str], alt_reference: Optional[str] = None) -> str:
-    """
-    Format a reference.
+def _format_reference(reference: str | None, link_fmt: str | None, alt_reference: str | None = None) -> str:
+    """Format a reference.
 
-    :param reference:
-        the reference
-    :param link_fmt:
-        the link format
-    :param alt_reference:
-        the link target. Defaults to the reference.
-    :return:
-        a Markdown reference
+    :param reference: the reference
+    :param link_fmt: the link format
+    :param alt_reference: the link target. Defaults to the reference.
+
+    :returns: a Markdown reference
     """
     if reference is None:
         return ""
@@ -133,15 +126,17 @@ def _format_reference(reference: Optional[str], link_fmt: Optional[str], alt_ref
 
 def _get_resolver_lines2(
     resolver: ClassResolver[X],
-    link_fmt: Optional[str] = None,
-    skip: Optional[Set[Type[X]]] = None,
+    link_fmt: str | None = None,
+    skip: set[type[X]] | None = None,
     top_k: int = 2,
-) -> Iterable[Tuple[str, str, Optional[str]]]:
+) -> Iterable[tuple[str, str, str | None]]:
     for _, clsx in sorted(resolver.lookup_dict.items()):
         if skip and clsx in skip:
             continue
         # determine fully qualified name
         module, name = clsx.__module__, clsx.__qualname__
+        if "pykeen.nn.meta" in module:
+            continue
         full = f"{module}.{name}"
         # shorten to main module
         if top_k:
@@ -165,7 +160,7 @@ def _get_resolver_lines2(
         yield name, reference, citation
 
 
-def _help_models(tablefmt: str = "github", *, link_fmt: Optional[str] = None) -> Tuple[str, int]:
+def _help_models(tablefmt: str = "github", *, link_fmt: str | None = None) -> tuple[str, int]:
     lines = sorted(_get_resolver_lines2(resolver=model_resolver, link_fmt=link_fmt))
     headers = ["Name", "Model", "Citation"]
     return (
@@ -178,7 +173,7 @@ def _help_models(tablefmt: str = "github", *, link_fmt: Optional[str] = None) ->
     )
 
 
-def _help_interactions(tablefmt: str = "github", *, link_fmt: Optional[str] = None) -> Tuple[str, int]:
+def _help_interactions(tablefmt: str = "github", *, link_fmt: str | None = None) -> tuple[str, int]:
     lines = list(
         _get_resolver_lines2(
             resolver=interaction_resolver,
@@ -196,7 +191,7 @@ def _help_interactions(tablefmt: str = "github", *, link_fmt: Optional[str] = No
     )
 
 
-def _help_representations(tablefmt: str = "github", *, link_fmt: Optional[str] = None) -> Tuple[str, int]:
+def _help_representations(tablefmt: str = "github", *, link_fmt: str | None = None) -> tuple[str, int]:
     lines = list(
         line[:2]
         for line in _get_resolver_lines2(
@@ -220,9 +215,9 @@ def _help_representations(tablefmt: str = "github", *, link_fmt: Optional[str] =
 @ls.command()
 def importers():
     """List triple importers."""
-    for prefix, f in sorted(PREFIX_IMPORTERS.items()):
+    for prefix, f in sorted(PREFIX_IMPORTER_RESOLVER.lookup_dict.items()):
         click.secho(f"prefix: {prefix} from {inspect.getmodule(f).__name__}")
-    for suffix, f in sorted(EXTENSION_IMPORTERS.items()):
+    for suffix, f in sorted(EXTENSION_IMPORTER_RESOLVER.lookup_dict.items()):
         click.secho(f"suffix: {suffix} from {inspect.getmodule(f).__name__}")
 
 
@@ -234,7 +229,7 @@ def datasets(tablefmt: str, sort_size: bool):
     click.echo(_help_datasets(tablefmt, sort_size=sort_size))
 
 
-def _help_datasets(tablefmt: str, link_fmt: Optional[str] = None, sort_size: bool = False):
+def _help_datasets(tablefmt: str, link_fmt: str | None = None, sort_size: bool = False):
     lines = _get_dataset_lines(tablefmt=tablefmt, link_fmt=link_fmt)
     if sort_size:
         lines = sorted(lines, key=lambda line: line[5], reverse=True)
@@ -245,7 +240,7 @@ def _help_datasets(tablefmt: str, link_fmt: Optional[str] = None, sort_size: boo
     )
 
 
-def _help_inductive_datasets(tablefmt: str, link_fmt: Optional[str] = None):
+def _help_inductive_datasets(tablefmt: str, link_fmt: str | None = None):
     lines = _get_inductive_dataset_lines(tablefmt=tablefmt, link_fmt=link_fmt)
     return tabulate(
         lines,
@@ -261,7 +256,7 @@ def training_loops(tablefmt: str):
     click.echo(_help_training(tablefmt))
 
 
-def _help_training(tablefmt: str, link_fmt: Optional[str] = None):
+def _help_training(tablefmt: str, link_fmt: str | None = None):
     lines = _get_resolver_lines(training_loop_resolver.lookup_dict, tablefmt, "training", link_fmt=link_fmt)
     return tabulate(
         lines,
@@ -277,7 +272,7 @@ def negative_samplers(tablefmt: str):
     click.echo(_help_negative_samplers(tablefmt))
 
 
-def _help_negative_samplers(tablefmt: str, link_fmt: Optional[str] = None):
+def _help_negative_samplers(tablefmt: str, link_fmt: str | None = None):
     lines = _get_resolver_lines(negative_sampler_resolver.lookup_dict, tablefmt, "sampling", link_fmt=link_fmt)
     return tabulate(
         lines,
@@ -293,7 +288,7 @@ def stoppers(tablefmt: str):
     click.echo(_help_stoppers(tablefmt))
 
 
-def _help_stoppers(tablefmt: str, link_fmt: Optional[str] = None):
+def _help_stoppers(tablefmt: str, link_fmt: str | None = None):
     lines = _get_resolver_lines(stopper_resolver.lookup_dict, tablefmt, "stoppers", link_fmt=link_fmt)
     return tabulate(
         lines,
@@ -309,7 +304,7 @@ def evaluators(tablefmt: str):
     click.echo(_help_evaluators(tablefmt))
 
 
-def _help_evaluators(tablefmt, link_fmt: Optional[str] = None):
+def _help_evaluators(tablefmt, link_fmt: str | None = None):
     lines = sorted(_get_resolver_lines(evaluator_resolver.lookup_dict, tablefmt, "evaluation", link_fmt=link_fmt))
     return tabulate(
         lines,
@@ -325,7 +320,7 @@ def losses(tablefmt: str):
     click.echo(_help_losses(tablefmt))
 
 
-def _help_losses(tablefmt: str, link_fmt: Optional[str] = None):
+def _help_losses(tablefmt: str, link_fmt: str | None = None):
     lines = _get_lines_alternative(tablefmt, loss_resolver.lookup_dict, "torch.nn", "pykeen.losses", link_fmt)
     return tabulate(
         lines,
@@ -341,7 +336,7 @@ def optimizers(tablefmt: str):
     click.echo(_help_optimizers(tablefmt))
 
 
-def _help_optimizers(tablefmt: str, link_fmt: Optional[str] = None):
+def _help_optimizers(tablefmt: str, link_fmt: str | None = None):
     lines = _get_lines_alternative(
         tablefmt,
         optimizer_resolver.lookup_dict,
@@ -363,7 +358,7 @@ def lr_schedulers(tablefmt: str):
     click.echo(_help_lr_schedulers(tablefmt))
 
 
-def _help_lr_schedulers(tablefmt: str, link_fmt: Optional[str] = None):
+def _help_lr_schedulers(tablefmt: str, link_fmt: str | None = None):
     lines = _get_lines_alternative(
         tablefmt,
         lr_scheduler_resolver.lookup_dict,
@@ -385,7 +380,7 @@ def regularizers(tablefmt: str):
     click.echo(_help_regularizers(tablefmt))
 
 
-def _help_regularizers(tablefmt, link_fmt: Optional[str] = None):
+def _help_regularizers(tablefmt, link_fmt: str | None = None):
     lines = _get_resolver_lines(regularizer_resolver.lookup_dict, tablefmt, "regularizers", link_fmt=link_fmt)
     return tabulate(
         lines,
@@ -394,7 +389,7 @@ def _help_regularizers(tablefmt, link_fmt: Optional[str] = None):
     )
 
 
-def _get_lines_alternative(tablefmt, d, torch_prefix, pykeen_prefix, link_fmt: Optional[str] = None):
+def _get_lines_alternative(tablefmt, d, torch_prefix, pykeen_prefix, link_fmt: str | None = None):
     for name, cls in sorted(d.items()):
         if any(cls.__module__.startswith(_prefix) for _prefix in ("torch", "optuna")):
             path = f"{torch_prefix}.{cls.__qualname__}"
@@ -454,7 +449,7 @@ def trackers(tablefmt: str):
     click.echo(_help_trackers(tablefmt))
 
 
-def _help_trackers(tablefmt: str, link_fmt: Optional[str] = None):
+def _help_trackers(tablefmt: str, link_fmt: str | None = None):
     lines = _get_resolver_lines(tracker_resolver.lookup_dict, tablefmt, "trackers", link_fmt=link_fmt)
     return tabulate(
         lines,
@@ -470,7 +465,7 @@ def hpo_samplers(tablefmt: str):
     click.echo(_help_hpo_samplers(tablefmt))
 
 
-def _help_hpo_samplers(tablefmt: str, link_fmt: Optional[str] = None):
+def _help_hpo_samplers(tablefmt: str, link_fmt: str | None = None):
     lines = _get_lines_alternative(
         tablefmt,
         sampler_resolver.lookup_dict,
@@ -485,7 +480,7 @@ def _help_hpo_samplers(tablefmt: str, link_fmt: Optional[str] = None):
     )
 
 
-METRIC_NAMES: Mapping[Type[MetricResults], str] = {
+METRIC_NAMES: Mapping[type[MetricResults], str] = {
     ClassificationMetricResults: "Classification",
     RankBasedMetricResults: "Ranking",
 }
@@ -514,8 +509,8 @@ def _get_metrics_lines(tablefmt: str):
 
 
 def _get_resolver_lines(
-    d: Mapping[str, Type[X]], tablefmt: str, submodule: str, link_fmt: Optional[str] = None
-) -> Union[Iterable[Tuple[str, str]], Iterable[Tuple[str, str, Optional[str]]]]:
+    d: Mapping[str, type[X]], tablefmt: str, submodule: str, link_fmt: str | None = None
+) -> Iterable[tuple[str, str]] | Iterable[tuple[str, str, str | None]]:
     for name, value in sorted(d.items()):
         if tablefmt == "rst":
             if isinstance(value, type):
@@ -544,7 +539,7 @@ def _get_resolver_lines(
             yield name, value.__doc__.splitlines()[0]
 
 
-def _get_dataset_lines(tablefmt, link_fmt: Optional[str] = None):
+def _get_dataset_lines(tablefmt, link_fmt: str | None = None):
     for name, value in sorted(dataset_resolver.lookup_dict.items()):
         reference = f"pykeen.datasets.{value.__name__}"
         if tablefmt == "rst":
@@ -582,7 +577,7 @@ def _get_dataset_lines(tablefmt, link_fmt: Optional[str] = None):
         yield name, reference, citation_str, entities, relations, triples
 
 
-def _get_inductive_dataset_lines(tablefmt, link_fmt: Optional[str] = None):
+def _get_inductive_dataset_lines(tablefmt, link_fmt: str | None = None):
     for name, value in sorted(inductive_dataset_resolver.lookup_dict.items()):
         reference = f"pykeen.datasets.{value.__name__}"
         if tablefmt == "rst":
@@ -623,7 +618,7 @@ def _link(text: str, link: str, fmt: str) -> str:
         return f"[{text}]({link})"
 
 
-def get_metric_list() -> List[Tuple[str, Type[Metric], Type[MetricResults]]]:
+def get_metric_list() -> list[tuple[str, type[Metric], type[MetricResults]]]:
     """Get info about all metrics across all evaluators."""
     return [
         (metric_key, metric_cls, resolver_cls)
