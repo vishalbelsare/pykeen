@@ -2,7 +2,7 @@
 
 import logging
 from abc import abstractmethod
-from typing import Iterable, Optional, Tuple
+from collections.abc import Iterable
 
 import pandas
 from class_resolver import HintOrType, OptionalKwargs
@@ -29,39 +29,30 @@ class EADataset(EagerDataset):
     def __init__(
         self,
         *,
-        side: Optional[EASide] = EA_SIDE_LEFT,
+        side: EASide | None = EA_SIDE_LEFT,
         create_inverse_triples: bool = False,
         random_state: TorchRandomHint = 0,
-        split_ratios: Tuple[float, float, float] = (0.8, 0.1, 0.1),
+        split_ratios: tuple[float, float, float] = (0.8, 0.1, 0.1),
         combination: HintOrType[GraphPairCombinator] = None,
         combination_kwargs: OptionalKwargs = None,
         **kwargs,
     ) -> None:
-        """
-        Initialize the dataset.
+        """Initialize the dataset.
 
-        :param side:
-            the side, if only a single graph should be considered, or `None` to combine the two graphs into a
+        :param side: the side, if only a single graph should be considered, or `None` to combine the two graphs into a
             single one, using `combination`.
-        :param create_inverse_triples:
-            whether to create inverse triples.
-        :param random_state:
-            the random state to use for reproducible splits
-        :param split_ratios:
-            the split ratios used to perform the train/test/validation split.
-        :param combination:
-            the graph combination. only effective if side is `None`
-        :param combination_kwargs:
-            additional keyword-based parameters for the graph combination
-        :param kwargs:
-            any additional keyword-based parameters are passed to :meth:`EagerDataset.__init__`.
+        :param create_inverse_triples: whether to create inverse triples.
+        :param random_state: the random state to use for reproducible splits
+        :param split_ratios: the split ratios used to perform the train/test/validation split.
+        :param combination: the graph combination. only effective if side is `None`
+        :param combination_kwargs: additional keyword-based parameters for the graph combination
+        :param kwargs: any additional keyword-based parameters are passed to :meth:`EagerDataset.__init__`.
 
-        :raises ValueError:
-            if an invalid side is passed
+        :raises ValueError: if an invalid side is passed
         """
         if side is None:
             # load both graphs
-            left, right = [self._load_graph(side=side) for side in EA_SIDES]
+            left, right = (self._load_graph(side=side) for side in EA_SIDES)
             # load alignment
             alignment = self._load_alignment()
             # drop duplicates

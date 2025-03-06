@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
-
 """Basic stoppers."""
 
 import logging
 import pathlib
 from abc import ABC, abstractmethod
-from typing import Any, List, Mapping, Union
+from collections.abc import Mapping
+from typing import Any
 
 import torch
 
@@ -21,13 +20,10 @@ class Stopper(ABC):
     """A harness for stopping training."""
 
     def __init__(self, *args, **kwargs):
-        """
-        Initialize the stopper.
+        """Initialize the stopper.
 
-        :param args:
-            ignored positional parameters
-        :param kwargs:
-            ignored keyword-based parameters
+        :param args: ignored positional parameters
+        :param kwargs: ignored keyword-based parameters
         """
         # To make MyPy happy
         self.best_epoch = None
@@ -55,7 +51,7 @@ class Stopper(ABC):
         relative_delta: float,
         metric: str,
         larger_is_better: bool,
-        results: List[float],
+        results: list[float],
         stopped: bool,
         best_epoch: int,
         best_metric: float,
@@ -63,17 +59,15 @@ class Stopper(ABC):
         pass
 
     @staticmethod
-    def load_summary_dict_from_training_loop_checkpoint(path: Union[str, pathlib.Path]) -> Mapping[str, Any]:
+    def load_summary_dict_from_training_loop_checkpoint(path: str | pathlib.Path) -> Mapping[str, Any]:
         """Load the summary dict from a training loop checkpoint.
 
-        :param path:
-            Path of the file where to store the state in.
+        :param path: Path of the file where to store the state in.
 
-        :return:
-            The summary dict of the stopper at the time of saving the checkpoint.
+        :returns: The summary dict of the stopper at the time of saving the checkpoint.
         """
         logger.info(f"=> loading stopper summary dict from training loop checkpoint in '{path}'")
-        checkpoint = torch.load(path)
+        checkpoint = torch.load(path, weights_only=False)
         logger.info(f"=> loaded stopper summary dictionary from checkpoint in '{path}'")
         return checkpoint["stopper_dict"]
 

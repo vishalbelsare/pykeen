@@ -1,13 +1,12 @@
-# -*- coding: utf-8 -*-
-
 """Implementation of early stopping."""
 
 import dataclasses
 import logging
 import math
 import pathlib
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, List, Mapping, Optional, Union
+from typing import Any
 from uuid import uuid4
 
 import torch
@@ -29,7 +28,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-StopperCallback = Callable[[Stopper, Union[int, float], int], None]
+StopperCallback = Callable[[Stopper, int | float, int], None]
 
 
 def is_improvement(
@@ -38,20 +37,14 @@ def is_improvement(
     larger_is_better: bool,
     relative_delta: float = 0.0,
 ) -> bool:
-    """
-    Decide whether the current value is an improvement over the best value.
+    """Decide whether the current value is an improvement over the best value.
 
-    :param best_value:
-        The best value so far.
-    :param current_value:
-        The current value.
-    :param larger_is_better:
-        Whether a larger value is better.
-    :param relative_delta:
-        A minimum relative improvement until it is considered as an improvement.
+    :param best_value: The best value so far.
+    :param current_value: The current value.
+    :param larger_is_better: Whether a larger value is better.
+    :param relative_delta: A minimum relative improvement until it is considered as an improvement.
 
-    :return:
-        Whether the current value is better.
+    :returns: Whether the current value is better.
     """
     better = current_value > best_value if larger_is_better else current_value < best_value
     return better and not math.isclose(current_value, best_value, rel_tol=relative_delta)
@@ -71,7 +64,7 @@ class EarlyStoppingLogic:
     larger_is_better: bool = True
 
     #: The epoch at which the best result occurred
-    best_epoch: Optional[int] = None
+    best_epoch: int | None = None
 
     #: The best result so far
     best_metric: float = dataclasses.field(init=False)
@@ -94,19 +87,14 @@ class EarlyStoppingLogic:
         )
 
     def report_result(self, metric: float, epoch: int) -> bool:
-        """
-        Report a result at the given epoch.
+        """Report a result at the given epoch.
 
-        :param metric:
-            The result metric.
-        :param epoch:
-            The epoch.
+        :param metric: The result metric.
+        :param epoch: The epoch.
 
-        :return:
-            If the result did not improve more than delta for patience evaluations
+        :returns: If the result did not improve more than delta for patience evaluations
 
-        :raises ValueError:
-            if more than one metric is reported for a single epoch
+        :raises ValueError: if more than one metric is reported for a single epoch
         """
         if self.best_epoch is not None and epoch <= self.best_epoch:
             raise ValueError("Cannot report more than one metric for one epoch")
@@ -142,9 +130,9 @@ class EarlyStopper(Stopper):
     #: The triples to use for evaluation
     evaluation_triples_factory: CoreTriplesFactory
     #: Size of the evaluation batches
-    evaluation_batch_size: Optional[int] = None
+    evaluation_batch_size: int | None = None
     #: Slice size of the evaluation batches
-    evaluation_slice_size: Optional[int] = None
+    evaluation_slice_size: int | None = None
     #: The number of epochs after which the model is evaluated on validation set
     frequency: int = 10
     #: The number of iterations (one iteration can correspond to various epochs)
@@ -155,24 +143,28 @@ class EarlyStopper(Stopper):
     #: The minimum relative improvement necessary to consider it an improved result
     relative_delta: float = 0.01
     #: The metric results from all evaluations
-    results: List[float] = dataclasses.field(default_factory=list, repr=False)
+    results: list[float] = dataclasses.field(default_factory=list, repr=False)
     #: Whether a larger value is better, or a smaller
     larger_is_better: bool = True
     #: The result tracker
-    result_tracker: Optional[ResultTracker] = None
+    result_tracker: ResultTracker | None = None
     #: Callbacks when after results are calculated
-    result_callbacks: List[StopperCallback] = dataclasses.field(default_factory=list, repr=False)
+    result_callbacks: list[StopperCallback] = dataclasses.field(default_factory=list, repr=False)
     #: Callbacks when training gets continued
-    continue_callbacks: List[StopperCallback] = dataclasses.field(default_factory=list, repr=False)
+    continue_callbacks: list[StopperCallback] = dataclasses.field(default_factory=list, repr=False)
     #: Callbacks when training is stopped early
-    stopped_callbacks: List[StopperCallback] = dataclasses.field(default_factory=list, repr=False)
+    stopped_callbacks: list[StopperCallback] = dataclasses.field(default_factory=list, repr=False)
     #: Did the stopper ever decide to stop?
     stopped: bool = False
-    #: the path to the weights of the best model
-    best_model_path: Optional[pathlib.Path] = None
-    #: whether to delete the file with the best model weights after termination
+    #: The path to the weights of the best model
+    best_model_path: pathlib.Path | None = None
+    #: Whether to delete the file with the best model weights after termination
     #: note: the weights will be re-loaded into the model before
     clean_up_checkpoint: bool = True
+    #: Whether to use a tqdm progress bar for evaluation
+    use_tqdm: bool = False
+    #: Keyword arguments for the tqdm progress bar
+    tqdm_kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     _stopper: EarlyStoppingLogic = dataclasses.field(init=False, repr=False)
 
@@ -191,8 +183,7 @@ class EarlyStopper(Stopper):
             logger.info(f"Inferred checkpoint path for best model weights: {self.best_model_path}")
         if self.best_model_path.is_file():
             logger.warning(
-                f"Checkpoint path for best weights does already exist ({self.best_model_path})."
-                f"It will be overwritten."
+                f"Checkpoint path for best weights does already exist ({self.best_model_path}). It will be overwritten."
             )
 
     @property
@@ -206,7 +197,7 @@ class EarlyStopper(Stopper):
         return self._stopper.best_metric
 
     @property
-    def best_epoch(self) -> Optional[int]:
+    def best_epoch(self) -> int | None:
         """Return the epoch at which the best result occurred."""
         return self._stopper.best_epoch
 
@@ -228,7 +219,8 @@ class EarlyStopper(Stopper):
             model=self.model,
             additional_filter_triples=self.training_triples_factory.mapped_triples,
             mapped_triples=self.evaluation_triples_factory.mapped_triples,
-            use_tqdm=False,
+            use_tqdm=self.use_tqdm,
+            tqdm_kwargs=self.tqdm_kwargs,
             batch_size=self.evaluation_batch_size,
             slice_size=self.evaluation_slice_size,
             # Only perform time-consuming checks for the first call.
@@ -261,7 +253,7 @@ class EarlyStopper(Stopper):
             for stopped_callback in self.stopped_callbacks:
                 stopped_callback(self, result, epoch)
             logger.info(f"Re-loading weights from best epoch from {self.best_model_path}")
-            self.model.load_state_dict(torch.load(self.best_model_path))
+            self.model.load_state_dict(torch.load(self.best_model_path, weights_only=False))
             if self.clean_up_checkpoint:
                 self.best_model_path.unlink()
                 logger.debug(f"Clean up checkpoint with best weights: {self.best_model_path}")
@@ -301,7 +293,7 @@ class EarlyStopper(Stopper):
         relative_delta: float,
         metric: str,
         larger_is_better: bool,
-        results: List[float],
+        results: list[float],
         stopped: bool,
         best_epoch: int,
         best_metric: float,

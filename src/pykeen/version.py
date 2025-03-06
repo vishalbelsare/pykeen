@@ -1,12 +1,9 @@
-# -*- coding: utf-8 -*-
-
 """Version information for PyKEEN."""
 
 import os
 import sys
 from functools import lru_cache
 from subprocess import CalledProcessError, check_output  # noqa: S404
-from typing import Optional, Tuple
 
 __all__ = [
     "VERSION",
@@ -16,7 +13,7 @@ __all__ = [
     "env",
 ]
 
-VERSION = "1.10.2-dev"
+VERSION = "1.11.1-dev"
 
 
 @lru_cache(maxsize=2)
@@ -24,9 +21,9 @@ def get_git_hash(terse: bool = True) -> str:
     """Get the PyKEEN git hash.
 
     :param terse: Should the hash be clipped to 8 characters?
-    :return:
-        The git hash, equals 'UNHASHED' if encountered CalledProcessError, signifying that the
-        code is not installed in development mode.
+
+    :returns: The git hash, equals 'UNHASHED' if encountered CalledProcessError, signifying that the code is not
+        installed in development mode.
     """
     rv = _run("git", "rev-parse", "HEAD")
     if rv is None:
@@ -37,20 +34,19 @@ def get_git_hash(terse: bool = True) -> str:
 
 
 @lru_cache(maxsize=1)
-def get_git_branch() -> Optional[str]:
+def get_git_branch() -> str | None:
     """Get the PyKEEN branch, if installed from git in editable mode.
 
-    :return:
-        Returns the name of the current branch, or None if not installed in development mode.
+    :returns: Returns the name of the current branch, or None if not installed in development mode.
     """
     return _run("git", "branch", "--show-current")
 
 
-def _run(*args: str) -> Optional[str]:
+def _run(*args: str) -> str | None:
     with open(os.devnull, "w") as devnull:
         try:
             ret = check_output(  # noqa: S603,S607
-                args,
+                args,  # noqa:S603
                 cwd=os.path.dirname(__file__),
                 stderr=devnull,
             )
@@ -63,14 +59,14 @@ def _run(*args: str) -> Optional[str]:
 def get_version(with_git_hash: bool = False) -> str:
     """Get the PyKEEN version string, including a git hash.
 
-    :param with_git_hash:
-        If set to True, the git hash will be appended to the version.
-    :return: The PyKEEN version as well as the git hash, if the parameter with_git_hash was set to true.
+    :param with_git_hash: If set to True, the git hash will be appended to the version.
+
+    :returns: The PyKEEN version as well as the git hash, if the parameter with_git_hash was set to true.
     """
     return f"{VERSION}-{get_git_hash(terse=True)}" if with_git_hash else VERSION
 
 
-def env_table(tablefmt: str = "github", headers: Tuple[str, str] = ("Key", "Value")) -> str:
+def env_table(tablefmt: str = "github", headers: tuple[str, str] = ("Key", "Value")) -> str:
     """Generate a table describing the environment in which PyKEEN is being run."""
     import platform
     import time
@@ -106,6 +102,7 @@ def env(file=None):
     """Print the env or output as HTML if in Jupyter.
 
     :param file: The file to print to if not in a Jupyter setting. Defaults to sys.stdout
+
     :returns: A :class:`IPython.display.HTML` if in a Jupyter notebook setting, otherwise none.
     """
     if _in_jupyter():

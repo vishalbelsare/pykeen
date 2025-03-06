@@ -1,9 +1,9 @@
 """Command-Line Interface for pre-computing tokenizations for NodePiece."""
+
 import copy
 import logging
 import math
 import pathlib
-from typing import Optional
 
 import click
 import more_click
@@ -30,9 +30,9 @@ logger = logging.getLogger(__name__)
 def tokenize(
     dataset: str,
     configuration_path: pathlib.Path,
-    num_tokens: Optional[int],
-    num_anchors: Optional[int],
-    output_path: Optional[pathlib.Path],
+    num_tokens: int | None,
+    num_anchors: int | None,
+    output_path: pathlib.Path | None,
     log_level: str,
     force: bool,
 ):

@@ -1,6 +1,7 @@
 """Base classes for inductive models."""
+
 from collections import ChainMap
-from typing import Mapping, Optional, Sequence
+from collections.abc import Mapping, Sequence
 
 from class_resolver import OneOrManyHintOrType, OneOrManyOptionalKwargs
 from torch import nn
@@ -12,12 +13,11 @@ from ...typing import TESTING, TRAINING, VALIDATION, InductiveMode
 
 
 class InductiveERModel(ERModel):
-    """
-    A base class for inductive models.
+    """A base class for inductive models.
 
-    This model assumes a shared set of relations between all triple sets (e.g., training and validation), and a
-    separate inference factory used during validation. During testing time, either the validation factory is re-used
-    or another separate testing factory may be provided.
+    This model assumes a shared set of relations between all triple sets (e.g., training and validation), and a separate
+    inference factory used during validation. During testing time, either the validation factory is re-used or another
+    separate testing factory may be provided.
     """
 
     #: a mapping from inductive mode to corresponding entity representations
@@ -32,24 +32,19 @@ class InductiveERModel(ERModel):
         entity_representations_kwargs: OneOrManyOptionalKwargs = None,
         # inductive factories
         validation_factory: CoreTriplesFactory,
-        testing_factory: Optional[CoreTriplesFactory] = None,
+        testing_factory: CoreTriplesFactory | None = None,
         **kwargs,
     ) -> None:
         """Initialize the inductive model.
 
-        :param triples_factory:
-            the (training) factory
-        :param entity_representations:
-            the training entity representations
-        :param entity_representations_kwargs:
-            additional keyword-based parameters for the training entity representations
-        :param validation_factory:
-            the validation factory
-        :param testing_factory:
-            the testing factory. If None, the validation factory is re-used, i.e., validation and test entities come
-            from the same (unseen) set of entities.
-        :param kwargs:
-            additional keyword-based parameters passed to :meth:`ERModel.__init__`
+        :param triples_factory: the (training) factory
+        :param entity_representations: the training entity representations
+        :param entity_representations_kwargs: additional keyword-based parameters for the training entity
+            representations
+        :param validation_factory: the validation factory
+        :param testing_factory: the testing factory. If None, the validation factory is re-used, i.e., validation and
+            test entities come from the same (unseen) set of entities.
+        :param kwargs: additional keyword-based parameters passed to :meth:`ERModel.__init__`
         """
         super().__init__(
             triples_factory=triples_factory,
@@ -94,7 +89,7 @@ class InductiveERModel(ERModel):
 
     # docstr-coverage: inherited
     def _get_entity_representations_from_inductive_mode(
-        self, *, mode: Optional[InductiveMode]
+        self, *, mode: InductiveMode | None
     ) -> Sequence[Representation]:  # noqa: D102
         if mode is None:
             raise ValueError(
@@ -106,5 +101,5 @@ class InductiveERModel(ERModel):
         raise ValueError(f"{self.__class__.__name__} does not support mode={mode}")
 
     # docstr-coverage: inherited
-    def _get_entity_len(self, *, mode: Optional[InductiveMode]) -> Optional[int]:  # noqa: D102
+    def _get_entity_len(self, *, mode: InductiveMode | None) -> int | None:  # noqa: D102
         return self._get_entity_representations_from_inductive_mode(mode=mode)[0].max_id
